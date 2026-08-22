@@ -12,13 +12,10 @@ except ImportError:
     from models import PolicyClause
 
 
-# Regex to detect `# Part <num> — <title>`
 PART_PATTERN = re.compile(r"^#\s+(Part\s+(\d+)\s*[—\-–]\s*(.+))$", re.IGNORECASE)
 
-# Regex to detect `## <num>.<num> <title>`
 SECTION_PATTERN = re.compile(r"^##\s+((\d+\.\d+)\s+(.+))$")
 
-# Regex to detect clause start: `**1.1.1** ...` or `**1.4.1 Applicant** — ...`
 CLAUSE_START_PATTERN = re.compile(
     r"^\*\*(?P<clause_id>\d+\.\d+\.\d+)(?:\s+(?P<title>[^*]+))?\*\*\s*(?P<rest>.*)$"
 )
@@ -88,7 +85,6 @@ def load_policy(file_path: Union[str, Path] = "data/policy-manual.md") -> List[P
         )
         clauses.append(clause)
 
-        # Reset state
         current_clause_id = None
         current_clause_title = None
         current_clause_lines = []
@@ -97,7 +93,6 @@ def load_policy(file_path: Union[str, Path] = "data/policy-manual.md") -> List[P
     for line in lines:
         stripped = line.strip()
 
-        # Check for Part heading (# Part ...)
         part_match = PART_PATTERN.match(stripped)
         if part_match:
             finalize_current_clause()
@@ -110,7 +105,6 @@ def load_policy(file_path: Union[str, Path] = "data/policy-manual.md") -> List[P
             current_section_num = None
             continue
 
-        # Check for Section heading (## X.Y ...)
         sec_match = SECTION_PATTERN.match(stripped)
         if sec_match:
             finalize_current_clause()
@@ -118,12 +112,10 @@ def load_policy(file_path: Union[str, Path] = "data/policy-manual.md") -> List[P
             current_section_num = sec_match.group(2).strip()
             continue
 
-        # Check for divider or footer
         if stripped == "---" or stripped.startswith("*End of consolidated text"):
             finalize_current_clause()
             continue
 
-        # Check for Clause start (**X.Y.Z** or **X.Y.Z Title**)
         clause_match = CLAUSE_START_PATTERN.match(line)
         if clause_match:
             finalize_current_clause()
@@ -146,15 +138,12 @@ def load_policy(file_path: Union[str, Path] = "data/policy-manual.md") -> List[P
                 else:
                     current_clause_lines = []
         else:
-            # Continuing lines within the current clause
             if current_clause_id is not None:
                 current_clause_lines.append(line)
                 current_raw_lines.append(line)
 
-    # Finalize last clause if any
     finalize_current_clause()
 
-    # Validate extracted clauses
     if not clauses:
         raise ValueError(f"No clauses extracted from {path}.")
 
@@ -177,7 +166,6 @@ def get_clause_by_id(clauses: List[PolicyClause], clause_id: str) -> Optional[Po
 
 if __name__ == "__main__":
     import sys
-    # Ensure UTF-8 output in Windows console if supported
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8")
