@@ -115,6 +115,35 @@ class TestPolicyRetriever(unittest.TestCase):
         self.assertIsInstance(top.score, float)
         self.assertIn("score", top.to_dict())
 
+    def test_reporting_change_retrieves_4_3_2_and_9_1_4(self):
+        """Regression test: Query for reporting changes must retrieve primary obligation §4.3.2 AND §9.1.4."""
+        query = "What is the deadline for reporting a change of circumstances?"
+        results = self.retriever.retrieve(query, top_k=5)
+        retrieved_ids = [r.clause_id for r in results]
+
+        self.assertIn("4.3.2", retrieved_ids, "Primary obligation §4.3.2 must be retrieved")
+        self.assertIn("9.1.4", retrieved_ids, "Overpayment reference §9.1.4 must be retrieved")
+        # Ensure §4.3.2 is ranked in top 2
+        self.assertIn("4.3.2", retrieved_ids[:2])
+
+    def test_cross_reference_generalization_sanctions(self):
+        """Test generalization: Query on sanctions for failure to report retrieves both §10.5.1 and §4.3.2."""
+        query = "What penalty or sanction is imposed if I fail to report a change in household?"
+        results = self.retriever.retrieve(query, top_k=5)
+        retrieved_ids = [r.clause_id for r in results]
+
+        self.assertIn("10.5.1", retrieved_ids)
+        self.assertIn("4.3.2", retrieved_ids)
+
+    def test_cross_reference_generalization_award_calculation(self):
+        """Test generalization: Query on award calculation retrieves formula §7.1.1 and needs table §7.2.1."""
+        query = "How is the monthly award calculated and what are the needs figures?"
+        results = self.retriever.retrieve(query, top_k=5)
+        retrieved_ids = [r.clause_id for r in results]
+
+        self.assertIn("7.1.1", retrieved_ids)
+        self.assertIn("7.2.1", retrieved_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

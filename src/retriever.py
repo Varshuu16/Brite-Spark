@@ -1,8 +1,9 @@
 """
 Deterministic Lexical Policy Retriever using BM25 with multi-field weighting,
-Porter stemming, exact phrase boosting, and cross-reference expansion.
+Porter stemming, concept expansion, cross-reference graph propagation, and proximity scoring.
 """
 
+from collections import defaultdict
 from dataclasses import dataclass
 import math
 from pathlib import Path
@@ -39,6 +40,17 @@ STOP_WORDS: Set[str] = {
     "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would",
     "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours",
     "yourself", "yourselves"
+}
+
+
+# Generic procedural and legal concept expansions for policy retrieval
+CONCEPT_SYNONYMS: Dict[str, List[str]] = {
+    "deadlin": ["time", "limit", "period", "day", "within", "date", "deadlin"],
+    "timefram": ["time", "limit", "period", "day", "within", "date"],
+    "due": ["time", "limit", "period", "day", "within", "date"],
+    "oblig": ["must", "requir", "oblig"],
+    "penalti": ["sanction", "reduc", "penalti"],
+    "disput": ["appeal", "review", "panel"],
 }
 
 
@@ -201,7 +213,6 @@ def tokenize(text: str, stem: bool = True, remove_stopwords: bool = True) -> Lis
     """
     if not text:
         return []
-    # Tokenize words, numbers, and section markers
     raw_tokens = re.findall(r"\b[a-zA-Z0-9_\.\$]+\b", text.lower())
     tokens = []
     for token in raw_tokens:
@@ -260,7 +271,8 @@ class ScoredClause:
 
 class PolicyRetriever:
     """
-    Deterministic Lexical BM25 retriever with multi-field weighting and exact phrase scoring.
+    Deterministic Lexical BM25 retriever with multi-field weighting, concept expansion,
+    cross-reference citation graph propagation, and phrase proximity scoring.
     """
 
     def __init__(
@@ -301,20 +313,29 @@ class PolicyRetriever:
         self._build_index()
 
     def _build_index(self):
-        """Builds inverted index, document token statistics, and IDF tables."""
+        """Builds inverted index, document token statistics, cross-reference map, and IDF tables."""
         self.doc_count = len(self.clauses)
         self.doc_tokens: List[List[str]] = []
         self.doc_lengths: List[float] = []
         self.df: Dict[str, int] = {}
         self.clause_index: Dict[str, int] = {}
+        self.section_to_clause_indices: Dict[str, List[int]] = defaultdict(list)
+        self.cross_refs: Dict[int, List[str]] = {}
 
-        # Raw texts for exact phrase matching
+        # Raw texts for exact phrase and proximity matching
         self.raw_texts: List[str] = []
 
         total_length = 0.0
 
         for idx, clause in enumerate(self.clauses):
             self.clause_index[clause.clause_id] = idx
+            sec_num = clause.hierarchy.get("section_number")
+            if sec_num:
+                self.section_to_clause_indices[sec_num].append(idx)
+
+            # Extract internal cross-references (§X.Y.Z or §X.Y)
+            refs = re.findall(r"§(\d+\.\d+(?:\.\d+)?)", clause.clause_text)
+            self.cross_refs[idx] = refs
 
             # Tokenize individual fields
             title_tokens = tokenize(clause.clause_title or "", stem=True, remove_stopwords=True)
@@ -351,9 +372,9 @@ class PolicyRetriever:
             val = (self.doc_count - freq + 0.5) / (freq + 0.5)
             self.idf[term] = math.log(1.0 + max(val, 0.01)) + 1.0
 
-    def _compute_exact_phrase_bonus(self, query_raw: str, doc_idx: int) -> float:
+    def _compute_phrase_and_proximity_bonus(self, query_raw: str, doc_idx: int) -> float:
         """
-        Computes an additional bonus score if consecutive query words appear as an exact phrase.
+        Computes bonus score for exact phrases and sliding-window term co-occurrence.
         """
         raw_doc = self.raw_texts[doc_idx]
         bonus = 0.0
@@ -380,6 +401,21 @@ class PolicyRetriever:
         if len(non_stop_words) >= 2 and full_phrase in raw_doc:
             bonus += 5.0
 
+        # Term proximity bonus (e.g. 'change' and 'circumstances' within 10 words)
+        doc_words = re.findall(r"\b[a-zA-Z0-9_\$]+\b", raw_doc)
+        if len(non_stop_words) >= 2 and len(doc_words) >= 2:
+            stems = [STEMMER.stem(w) for w in non_stop_words]
+            doc_stems = [STEMMER.stem(w) for w in doc_words]
+            # Check if main query concepts appear within a small window
+            found_pos = [i for i, s in enumerate(doc_stems) if s in stems]
+            if len(found_pos) >= 2:
+                # Find min distance between different query stems
+                for a in range(len(found_pos) - 1):
+                    dist = found_pos[a+1] - found_pos[a]
+                    if 1 < dist <= 8 and doc_stems[found_pos[a]] != doc_stems[found_pos[a+1]]:
+                        bonus += 2.0
+                        break
+
         return bonus
 
     def retrieve(
@@ -401,57 +437,84 @@ class PolicyRetriever:
         """
         threshold = self.min_score if min_score is None else min_score
 
-        query_tokens = tokenize(query, stem=True, remove_stopwords=True)
-        if not query_tokens:
+        base_tokens = tokenize(query, stem=True, remove_stopwords=True)
+        if not base_tokens:
             return []
 
-        # Count query term frequencies
-        qtf: Dict[str, int] = {}
-        for qt in query_tokens:
-            qtf[qt] = qtf.get(qt, 0) + 1
+        # Expand query with generic procedural/legal concept synonyms
+        expanded_qtf: Dict[str, float] = {}
+        for token in base_tokens:
+            expanded_qtf[token] = expanded_qtf.get(token, 0.0) + 1.0
+            if token in CONCEPT_SYNONYMS:
+                for syn in CONCEPT_SYNONYMS[token]:
+                    # Synonym receives fractional weight (0.6x)
+                    expanded_qtf[syn] = expanded_qtf.get(syn, 0.0) + 0.6
 
-        scores: List[Tuple[int, float]] = []
+        # Step 1: Initial BM25 Scoring
+        raw_scores: Dict[int, float] = {}
 
         for idx, clause in enumerate(self.clauses):
             doc_terms = self.doc_tokens[idx]
             doc_len = self.doc_lengths[idx]
 
-            # Calculate term frequencies for this doc
             tf_map: Dict[str, int] = {}
             for t in doc_terms:
                 tf_map[t] = tf_map.get(t, 0) + 1
 
             bm25_score = 0.0
-            for term, q_count in qtf.items():
+            for term, q_weight in expanded_qtf.items():
                 if term not in tf_map:
                     continue
 
                 tf = tf_map[term]
                 idf = self.idf.get(term, 1.0)
 
-                # BM25 core equation
                 num = tf * (self.k1 + 1.0)
                 denom = tf + self.k1 * (1.0 - self.b + self.b * (doc_len / self.avg_doc_len))
-                term_score = idf * (num / denom)
+                term_score = idf * (num / denom) * q_weight
                 bm25_score += term_score
 
-            # Add exact phrase bonus
-            phrase_bonus = self._compute_exact_phrase_bonus(query, idx)
+            phrase_bonus = self._compute_phrase_and_proximity_bonus(query, idx)
             total_score = bm25_score + phrase_bonus
 
-            # Check for direct clause ID reference in query (e.g. "§4.3.2" or "4.3.2")
+            # Direct citation match bonus (e.g. §4.3.2 in query)
             if clause.clause_id in query or clause.citation in query:
                 total_score += 20.0
 
-            if total_score >= threshold:
-                scores.append((idx, total_score))
+            if total_score > 0.0:
+                raw_scores[idx] = total_score
+
+        # Step 2: Cross-Reference Citation Graph Propagation
+        # If candidate clauses cite other clauses or sections, propagate relevance to cited targets
+        final_scores: Dict[int, float] = dict(raw_scores)
+        for idx, score in raw_scores.items():
+            if score < 3.0:
+                continue
+            refs = self.cross_refs.get(idx, [])
+            for ref in refs:
+                # Direct clause reference (e.g. '4.3.2')
+                if ref in self.clause_index:
+                    target_idx = self.clause_index[ref]
+                    transfer = score * 0.30
+                    final_scores[target_idx] = final_scores.get(target_idx, 0.0) + transfer
+                # Section reference (e.g. '4.3' -> clauses '4.3.1', '4.3.2', ...)
+                elif ref in self.section_to_clause_indices:
+                    sec_indices = self.section_to_clause_indices[ref]
+                    transfer = (score * 0.25) / max(len(sec_indices), 1)
+                    for target_idx in sec_indices:
+                        final_scores[target_idx] = final_scores.get(target_idx, 0.0) + transfer
+
+        # Filter by threshold
+        qualified: List[Tuple[int, float]] = [
+            (idx, score) for idx, score in final_scores.items() if score >= threshold
+        ]
 
         # Sort strictly deterministic: descending by score, tie-break by clause_id
-        scores.sort(key=lambda item: (-item[1], self.clauses[item[0]].clause_id))
+        qualified.sort(key=lambda item: (-item[1], self.clauses[item[0]].clause_id))
 
         results = [
             ScoredClause(clause=self.clauses[idx], score=score)
-            for idx, score in scores[:top_k]
+            for idx, score in qualified[:top_k]
         ]
         return results
 
@@ -468,19 +531,19 @@ if __name__ == "__main__":
     retriever = PolicyRetriever()
 
     demo_queries = [
-        "What is the deadline for reporting a change?",
+        "What is the deadline for reporting a change of circumstances?",
         "How much is the earnings disregard?",
         "Who is considered a full-time student?",
         "What happens if an overpayment was caused by Department error?",
     ]
 
     print("=" * 70)
-    print("Policy Retriever Demonstration")
+    print("Policy Retriever Demonstration (Enhanced)")
     print("=" * 70)
 
     for q in demo_queries:
         print(f"\nQuestion:\n{q}\n")
-        results = retriever.retrieve(q, top_k=3)
+        results = retriever.retrieve(q, top_k=5)
         print("Retrieved clauses:")
         if not results:
             print("  (No matching clauses found above threshold)")
