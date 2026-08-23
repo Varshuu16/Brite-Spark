@@ -457,6 +457,167 @@ class TestGroundedAnswer(unittest.TestCase):
         self.assertIn("10 calendar days", result.answer)
         self.assertIn("14 calendar days", result.answer)
 
+    # =========================================================================
+    # PART 4 ROBUST CITATION TESTS
+    # =========================================================================
+
+    def test_part4_a_valid_original_citation(self):
+        """Test Part 4A: Valid original policy citation matching retrieved evidence is accepted."""
+        evidence = [self.clause_4_3_2]
+        mock_response = "The recipient must report within 10 calendar days [§4.3.2]."
+
+        result = generate_answer(
+            question="What is the reporting deadline?",
+            retrieved_clauses=evidence,
+            client=lambda p: mock_response,
+        )
+
+        self.assertTrue(result.grounded)
+        self.assertIn("4.3.2", result.citations)
+        self.assertEqual(result.unsupported_citations, [])
+        self.assertTrue(result.citation_complete)
+        self.assertEqual(len(result.validated_citations), 1)
+        self.assertEqual(result.validated_citations[0].clause_id, "4.3.2")
+        self.assertEqual(result.validated_citations[0].source_document, "policy-manual.md")
+
+    def test_part4_b_unsupported_original_citation(self):
+        """Test Part 4B: Citing an original clause NOT in retrieved evidence is rejected as unsupported."""
+        evidence = [self.clause_4_3_2]
+        mock_response = "The recipient must report within 14 days [§6.4.1]."
+
+        result = generate_answer(
+            question="What is the reporting deadline?",
+            retrieved_clauses=evidence,
+            client=lambda p: mock_response,
+        )
+
+        self.assertFalse(result.grounded)
+        self.assertIn("6.4.1", result.unsupported_citations)
+        self.assertNotIn("6.4.1", result.citations)
+
+    def test_part4_c_valid_amendment_citation(self):
+        """Test Part 4C: Citing an amendment provision present in retrieved evidence is accepted."""
+        from src.loader import load_amendment
+        amendments = load_amendment("data/Amendment No. 2026-01.md")
+        amend_5_2 = [c for c in amendments if c.clause_id == "Amendment 2026-01 §5.2"][0]
+
+        evidence = [self.clause_4_3_2, amend_5_2]
+        mock_response = "Because the change occurred before 1 March 2026, the previous rule applies [Amendment 2026-01 §5.2]."
+
+        result = generate_answer(
+            question="What is the rule?",
+            retrieved_clauses=evidence,
+            client=lambda p: mock_response,
+        )
+
+        self.assertTrue(result.grounded)
+        self.assertIn("Amendment 2026-01 §5.2", result.citations)
+        self.assertEqual(result.unsupported_citations, [])
+        self.assertTrue(result.citation_complete)
+        self.assertTrue(any(vc.is_transitional for vc in result.validated_citations))
+
+    def test_part4_d_unsupported_amendment_citation(self):
+        """Test Part 4D: Citing an amendment provision NOT in retrieved evidence is rejected."""
+        from src.loader import load_amendment
+        amendments = load_amendment("data/Amendment No. 2026-01.md")
+        amend_5_2 = [c for c in amendments if c.clause_id == "Amendment 2026-01 §5.2"][0]
+
+        evidence = [self.clause_4_3_2, amend_5_2]  # Only §5.2 provided, NOT §5.1
+        mock_response = "Because of Amendment 2026-01 §5.1, the new rule applies [Amendment 2026-01 §5.1]."
+
+        result = generate_answer(
+            question="What rule applies?",
+            retrieved_clauses=evidence,
+            client=lambda p: mock_response,
+        )
+
+        self.assertFalse(result.grounded)
+        self.assertIn("Amendment 2026-01 §5.1", result.unsupported_citations)
+
+    def test_part4_e_no_citation_for_substantive_claim(self):
+        """Test Part 4E: Making a substantive factual policy claim with no citations flags missing citations."""
+        evidence = [self.clause_4_3_2]
+        mock_response = "The reporting deadline is 10 calendar days."  # No citations included
+
+        result = generate_answer(
+            question="What is the reporting deadline?",
+            retrieved_clauses=evidence,
+            client=lambda p: mock_response,
+        )
+
+        self.assertFalse(result.citation_complete, "Substantive claim without citation must fail completeness check")
+        self.assertTrue(result.has_missing_citations)
+
+    def test_part4_f_multiple_valid_citations(self):
+        """Test Part 4F: Multiple valid citations in single response are all recognized and linked."""
+        from src.loader import load_amendment
+        amendments = load_amendment("data/Amendment No. 2026-01.md")
+        amend_5_2 = [c for c in amendments if c.clause_id == "Amendment 2026-01 §5.2"][0]
+
+        evidence = [self.clause_4_3_2, amend_5_2]
+        mock_response = "A recipient must report within 10 calendar days [§4.3.2] under Amendment 2026-01 §5.2."
+
+        result = generate_answer(
+            question="What is the reporting deadline?",
+            retrieved_clauses=evidence,
+            client=lambda p: mock_response,
+        )
+
+        self.assertTrue(result.grounded)
+        self.assertTrue(result.citation_complete)
+        self.assertIn("4.3.2", result.citations)
+        self.assertIn("Amendment 2026-01 §5.2", result.citations)
+        self.assertEqual(result.unsupported_citations, [])
+        self.assertEqual(len(result.validated_citations), 2)
+        self.assertEqual(len(result.validated_citations), 2)
+
+    def test_part4_g_mixed_valid_and_invalid_citations(self):
+        """Test Part 4G: Response with one valid citation and one invalid citation reports both accurately."""
+        evidence = [self.clause_4_3_2]  # Only §4.3.2 provided
+        mock_response = "The reporting deadline is 10 days [§4.3.2], and disregard is $175 [§6.4.1]."
+
+        result = generate_answer(
+            question="What is the rule?",
+            retrieved_clauses=evidence,
+            client=lambda p: mock_response,
+        )
+
+        self.assertFalse(result.grounded)
+        self.assertIn("4.3.2", result.citations)
+        self.assertIn("6.4.1", result.unsupported_citations)
+
+    def test_part4_h_numeric_values_not_extracted_as_citations(self):
+        """Test Part 4H: Plain numbers, days, currency, and dates are NOT extracted as citations."""
+        sample_text = (
+            "The recipient must report within 10 calendar days or 14 calendar days from 1 March 2026 "
+            "for household earnings of $175 per month with a 15 per cent reduction in 2026."
+        )
+        extracted = extract_citations(sample_text)
+        self.assertEqual(extracted, [], f"Expected 0 extracted citations from plain numeric text, got: {extracted}")
+
+    def test_part4_traceability_metadata_preservation(self):
+        """Test Part 4: Validated citations preserve all provenance and clause metadata."""
+        from src.loader import load_amendment
+        amendments = load_amendment("data/Amendment No. 2026-01.md")
+        amend_6_4_1 = [c for c in amendments if c.clause_id == "6.4.1"][0]
+
+        evidence = [amend_6_4_1]
+        mock_response = "Under §6.4.1 as amended by Amendment 2026-01 §1.1, the disregard is $175."
+
+        result = generate_answer(
+            question="What is the disregard?",
+            retrieved_clauses=evidence,
+            client=lambda p: mock_response,
+        )
+
+        self.assertTrue(result.grounded)
+        self.assertGreater(len(result.validated_citations), 0)
+        vc = result.validated_citations[0]
+        self.assertEqual(vc.clause_id, "6.4.1")
+        self.assertTrue(vc.is_amendment)
+        self.assertIn("source_document", vc.to_dict())
+        self.assertEqual(vc.source_document, "Amendment No. 2026-01.md")
+
 
 if __name__ == "__main__":
     unittest.main()

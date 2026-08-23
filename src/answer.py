@@ -1,6 +1,6 @@
 """
-Grounded natural-language answer generation with citation verification
-and date-aware temporal policy versioning.
+Grounded natural-language answer generation with citation verification,
+evidence traceability, citation completeness analysis, and temporal policy versioning.
 """
 
 from dataclasses import dataclass, field
@@ -17,12 +17,12 @@ except ImportError:
     HAVE_GEMINI_SDK = False
 
 try:
-    from .models import PolicyClause
+    from .models import PolicyClause, PolicyCitation
     from .loader import load_policy, load_full_policy_corpus
     from .retriever import PolicyRetriever, ScoredClause
     from .temporal import TemporalContext, TemporalStatus, QueryEventType, extract_temporal_context
 except ImportError:
-    from models import PolicyClause
+    from models import PolicyClause, PolicyCitation
     from loader import load_policy, load_full_policy_corpus
     from retriever import PolicyRetriever, ScoredClause
     from temporal import TemporalContext, TemporalStatus, QueryEventType, extract_temporal_context
@@ -50,13 +50,16 @@ INSUFFICIENT_EVIDENCE_PHRASES = [
 @dataclass
 class AnswerResult:
     """
-    Structured outcome of a grounded answer generation attempt.
+    Structured outcome of a grounded answer generation attempt with full citation traceability.
     """
     answer: str
-    citations: List[str]
-    grounded: bool
-    insufficient_evidence: bool
+    citations: List[str] = field(default_factory=list)
+    validated_citations: List[PolicyCitation] = field(default_factory=list)
     unsupported_citations: List[str] = field(default_factory=list)
+    grounded: bool = True
+    citation_complete: bool = True
+    has_missing_citations: bool = False
+    insufficient_evidence: bool = False
     evidence_clause_ids: List[str] = field(default_factory=list)
     raw_response: Optional[str] = None
     temporal_context: Optional[TemporalContext] = None
@@ -65,41 +68,62 @@ class AnswerResult:
         return {
             "answer": self.answer,
             "citations": self.citations,
-            "grounded": self.grounded,
-            "insufficient_evidence": self.insufficient_evidence,
+            "validated_citations": [vc.to_dict() for vc in self.validated_citations],
             "unsupported_citations": self.unsupported_citations,
+            "grounded": self.grounded,
+            "citation_complete": self.citation_complete,
+            "has_missing_citations": self.has_missing_citations,
+            "insufficient_evidence": self.insufficient_evidence,
             "evidence_clause_ids": self.evidence_clause_ids,
             "temporal_status": self.temporal_context.status.value if self.temporal_context else None,
         }
 
     def __str__(self) -> str:
         status = "GROUNDED" if self.grounded else "UNGROUNDED"
+        complete_str = "COMPLETE" if self.citation_complete else "MISSING CITATIONS"
         cits = f"Citations: {self.citations}" if self.citations else "No citations"
-        return f"[{status} | {cits}]\n{self.answer}"
+        return f"[{status} | {complete_str} | {cits}]\n{self.answer}"
 
 
 def extract_citations(text: str) -> List[str]:
     """
-    Extracts all candidate clause IDs (e.g. '4.3.2', '10.5.3A', 'Amendment 2026-01 §5.1') from text.
+    Extracts all candidate clause IDs (e.g. '§4.3.2', '§10.5.3A', 'Amendment 2026-01 §5.1') from text.
+    Strictly filters out ordinary numbers, currency amounts, and dates.
     """
     seen: Set[str] = set()
     ordered: List[str] = []
 
-    # First extract full Amendment citations e.g. Amendment 2026-01 §5.2 or Amendment No. 2026-01 §5.1
-    amend_matches = re.findall(r"(?:Amendment\s+(?:No\.\s+)?2026-01\s+§?(\d+\.\d+))", text, re.IGNORECASE)
+    # 1. Extract Amendment citations, e.g. [Amendment 2026-01 §5.2] or Amendment No. 2026-01 §5.1
+    amend_matches = re.findall(
+        r"\[?(?:Amendment\s+(?:No\.\s+)?2026-01\s+§?(\d+\.\d+))\]?",
+        text,
+        re.IGNORECASE
+    )
     for m in amend_matches:
         full_id = f"Amendment 2026-01 §{m.strip()}"
         if full_id not in seen:
             seen.add(full_id)
             ordered.append(full_id)
 
-    # Remove amendment references before standard clause extraction to prevent false matching on amendment numbers/years
-    text_clean = re.sub(r"Amendment\s+(?:No\.\s+)?2026-01\s+§?\d+\.\d+", "", text, flags=re.IGNORECASE)
+    # 2. Remove amendment substrings to prevent false matches on amendment year or paragraph numbers
+    text_clean = re.sub(
+        r"\[?Amendment\s+(?:No\.\s+)?2026-01\s+§?\d+\.\d+\]?",
+        "",
+        text,
+        flags=re.IGNORECASE
+    )
 
-    # Match standard alphanumeric clauses like §4.3.2, §10.5.3A, 6.4.1
-    std_matches = re.findall(r"(?:§|\[§|clause\s+|section\s+)?(\d{1,2}\.\d{1,2}\.\d{1,2}[A-Za-z]?)", text_clean, re.IGNORECASE)
+    # 3. Match standard clauses with mandatory section/clause prefix:
+    # Requires '§', '[§', 'clause ', or 'section ' before clause identifier
+    # Matches: §4.3.2, [§4.3.2], §10.5.3A, section 6.4.1, clause 1.4.6, §6.4.1(a)
+    std_matches = re.findall(
+        r"(?:§|\[§|clause\s+|section\s+)(\d{1,2}\.\d{1,2}(?:\.\d{1,2}[A-Za-z]?(?:\([a-z]\))?)?)",
+        text_clean,
+        re.IGNORECASE
+    )
     for m in std_matches:
         clean = m.strip()
+        # Avoid year numbers or malformed tokens
         if clean.startswith("2026") or clean.startswith("2025"):
             continue
         if clean and clean not in seen:
@@ -172,50 +196,199 @@ GROUNDED ANSWER (with exact clause citations):"""
 
 def validate_citations(
     raw_text: str,
-    allowed_clause_ids: Set[str],
+    allowed_evidence: Union[Set[str], List[Union[PolicyClause, ScoredClause]]],
 ) -> Tuple[List[str], List[str], bool]:
     """
     Validates all clause citations in the generated response against retrieved evidence.
+    
+    Args:
+        raw_text: The generated answer text containing citations.
+        allowed_evidence: Set of allowed clause ID strings OR list of retrieved clause objects.
+        
+    Returns:
+        Tuple of (valid_citations, unsupported_citations, is_grounded)
     """
     found_citations = extract_citations(raw_text)
     valid_citations: List[str] = []
     unsupported_citations: List[str] = []
 
-    # Build normalized allowed lookup tokens
+    # Build allowed token lookup set and clause object map
     normalized_allowed: Set[str] = set()
-    for cid in allowed_clause_ids:
-        normalized_allowed.add(cid.lower())
-        clean = cid.lstrip("§").strip().lower()
-        normalized_allowed.add(clean)
-        if "§" in cid:
-            normalized_allowed.add(cid.split("§")[-1].strip().lower())
-        if " " in cid:
-            for piece in cid.split():
-                clean_p = piece.lstrip("§").strip().lower()
-                if "." in clean_p:
-                    normalized_allowed.add(clean_p)
+    clause_objects_by_token: Dict[str, PolicyClause] = {}
+
+    if isinstance(allowed_evidence, set):
+        for cid in allowed_evidence:
+            normalized_allowed.add(cid.lower())
+            clean = cid.lstrip("§").strip().lower()
+            normalized_allowed.add(clean)
+            if "§" in cid:
+                normalized_allowed.add(cid.split("§")[-1].strip().lower())
+            if " " in cid:
+                for piece in cid.split():
+                    clean_p = piece.lstrip("§").strip().lower()
+                    if "." in clean_p:
+                        normalized_allowed.add(clean_p)
+    else:
+        for item in allowed_evidence:
+            clause = item.clause if isinstance(item, ScoredClause) else item
+            tokens_for_clause = [
+                clause.clause_id.lower(),
+                clause.clause_id.lstrip("§").strip().lower(),
+                clause.citation.lower(),
+                clause.citation.lstrip("§").strip().lower(),
+            ]
+            if clause.hierarchy.get("amendment_paragraph"):
+                tokens_for_clause.append(clause.hierarchy["amendment_paragraph"].lower())
+                tokens_for_clause.append(clause.hierarchy["amendment_paragraph"].lstrip("§").strip().lower())
+            if clause.transitional_rule:
+                tokens_for_clause.append(f"amendment 2026-01 §{clause.transitional_rule}".lower())
+                tokens_for_clause.append(f"§{clause.transitional_rule}".lower())
+                tokens_for_clause.append(clause.transitional_rule.lower())
+
+            for tok in tokens_for_clause:
+                normalized_allowed.add(tok)
+                clause_objects_by_token[tok] = clause
 
     for cid in found_citations:
         clean = cid.lstrip("§").strip().lower()
         if (
             cid.lower() in normalized_allowed
             or clean in normalized_allowed
-            or any(clean == a.lstrip("§").strip().lower() for a in allowed_clause_ids)
-            or any(clean in a.lower() for a in allowed_clause_ids)
+            or any(clean == a.lstrip("§").strip().lower() for a in normalized_allowed)
+            or any(clean in a.lower() for a in normalized_allowed)
         ):
             valid_citations.append(cid)
         else:
             unsupported_citations.append(cid)
 
-    # Grounded if no unsupported citations were fabricated
     is_grounded = len(unsupported_citations) == 0
     return valid_citations, unsupported_citations, is_grounded
+
+
+def validate_citations_detailed(
+    raw_text: str,
+    retrieved_clauses: List[Union[PolicyClause, ScoredClause]],
+) -> Tuple[List[str], List[PolicyCitation], List[str], bool]:
+    """
+    Validates all clause citations in the generated response against retrieved evidence,
+    returning structured PolicyCitation objects linked directly to the evidence.
+    """
+    found_citations = extract_citations(raw_text)
+    valid_citation_ids: List[str] = []
+    validated_objects: List[PolicyCitation] = []
+    unsupported_citations: List[str] = []
+
+    # Map retrieved clauses by all their normalized identifiers
+    clause_map: Dict[str, PolicyClause] = {}
+    for item in retrieved_clauses:
+        clause = item.clause if isinstance(item, ScoredClause) else item
+        cid_lower = clause.clause_id.lower()
+        clause_map[cid_lower] = clause
+        clause_map[cid_lower.lstrip("§").strip()] = clause
+
+        cit_lower = clause.citation.lower()
+        clause_map[cit_lower] = clause
+        clause_map[cit_lower.lstrip("§").strip()] = clause
+
+        if clause.hierarchy.get("amendment_paragraph"):
+            ap_lower = clause.hierarchy["amendment_paragraph"].lower()
+            clause_map[ap_lower] = clause
+            clause_map[ap_lower.lstrip("§").strip()] = clause
+            clause_map[re.sub(r"§", "", ap_lower).strip()] = clause
+
+        if clause.transitional_rule:
+            t_rule = clause.transitional_rule.lower()
+            clause_map[f"amendment 2026-01 §{t_rule}"] = clause
+            clause_map[f"amendment 2026-01 {t_rule}"] = clause
+            clause_map[f"§{t_rule}"] = clause
+            clause_map[t_rule] = clause
+
+    for cid in found_citations:
+        cid_norm = cid.strip().lower()
+        clean = cid.lstrip("§").strip().lower()
+        clean_no_sec = re.sub(r"§", "", cid_norm).strip()
+        clean_base = re.sub(r"\([a-z]\)", "", clean).strip()
+
+        matched_clause: Optional[PolicyClause] = None
+
+        if cid_norm in clause_map:
+            matched_clause = clause_map[cid_norm]
+        elif clean in clause_map:
+            matched_clause = clause_map[clean]
+        elif clean_no_sec in clause_map:
+            matched_clause = clause_map[clean_no_sec]
+        elif clean_base in clause_map:
+            matched_clause = clause_map[clean_base]
+
+        if matched_clause is not None:
+            valid_citation_ids.append(cid)
+            canonical_id = f"§{cid}" if not cid.startswith("§") and not cid.startswith("Amendment") else cid
+            validated_objects.append(
+                PolicyCitation(
+                    citation_id=canonical_id,
+                    source_document=matched_clause.source_document,
+                    clause_id=matched_clause.clause_id,
+                    clause_title=matched_clause.clause_title,
+                    clause_text=matched_clause.clause_text[:200] if matched_clause.clause_text else None,
+                    is_amendment=matched_clause.is_amendment,
+                    is_transitional=matched_clause.is_transitional,
+                    amended_by=matched_clause.amended_by,
+                    transitional_rule=matched_clause.transitional_rule,
+                )
+            )
+        else:
+            unsupported_citations.append(cid)
+
+    is_grounded = len(unsupported_citations) == 0
+    return valid_citation_ids, validated_objects, unsupported_citations, is_grounded
 
 
 def check_insufficient_evidence(text: str) -> bool:
     """Detects whether the answer states that evidence is insufficient."""
     lower = text.lower()
     return any(phrase in lower for phrase in INSUFFICIENT_EVIDENCE_PHRASES)
+
+
+def check_citation_completeness(
+    answer: str,
+    valid_citations: List[Any],
+    insufficient_evidence: bool = False,
+) -> bool:
+    """
+    Deterministically verifies whether substantive policy claims in the answer are supported by citations.
+    
+    Returns:
+        True if the answer has valid citations OR is a refusal / uncertainty statement.
+        False if the answer makes factual policy claims but fails to provide citations.
+    """
+    # If the response indicates insufficient evidence / refusal, no policy citation is required
+    if insufficient_evidence or check_insufficient_evidence(answer):
+        return True
+
+    # If valid citations are present, citation completeness is satisfied
+    if len(valid_citations) > 0:
+        return True
+
+    # When no citations are present, check if the response makes substantive policy assertions
+    lower = answer.lower()
+
+    # Patterns indicating substantive administrative policy claims
+    policy_patterns = [
+        r"\b\d+\s+(?:calendar\s+)?(?:days|weeks|months|years)\b",  # e.g., 10 calendar days, 4 weeks
+        r"\$\d+",                                                    # e.g., $120, $175
+        r"\b\d+\s*(?:%|percent|per cent)\b",                        # e.g., 15 per cent, 20%
+        r"\b(?:must\s+report|required\s+to|obligation|entitled\s+to|eligible|ineligible)\b",
+        r"\b(?:disregard\s+is|disregarded|threshold\s+is|sanction\s+is|reduction\s+of)\b",
+        r"\b(?:deadline\s+is|period\s+is|within\s+\d+|apportioned)\b",
+    ]
+
+    has_substantive_claims = any(re.search(pat, lower) for pat in policy_patterns)
+
+    # If substantive claims were asserted without any citation, completeness failed
+    if has_substantive_claims:
+        return False
+
+    return True
 
 
 def generate_answer(
@@ -229,7 +402,8 @@ def generate_answer(
     temporal_context: Optional[TemporalContext] = None,
 ) -> AnswerResult:
     """
-    Generates a grounded natural-language answer using Gemini and retrieved policy evidence.
+    Generates a grounded natural-language answer using Gemini, retrieved policy evidence,
+    and rigorous citation verification and traceability.
     
     Args:
         question: The user inquiry.
@@ -265,7 +439,10 @@ def generate_answer(
         return AnswerResult(
             answer="The provided policy evidence is insufficient to answer this question.",
             citations=[],
+            validated_citations=[],
             grounded=True,
+            citation_complete=True,
+            has_missing_citations=False,
             insufficient_evidence=True,
             evidence_clause_ids=[],
             raw_response=None,
@@ -324,7 +501,10 @@ def generate_answer(
         return AnswerResult(
             answer=f"Error communicating with Gemini API: {err}",
             citations=[],
+            validated_citations=[],
             grounded=False,
+            citation_complete=True,
+            has_missing_citations=False,
             insufficient_evidence=True,
             unsupported_citations=[],
             evidence_clause_ids=sorted(list(allowed_ids)),
@@ -332,14 +512,20 @@ def generate_answer(
             temporal_context=t_ctx,
         )
 
-    # Validate citations and analyze grounding
-    valid_citations, unsupported_citations, is_grounded = validate_citations(raw_response, allowed_ids)
+    # Validate citations and analyze grounding and completeness
+    valid_citations, validated_objects, unsupported_citations, is_grounded = validate_citations_detailed(
+        raw_response, retrieved_clauses
+    )
     is_insufficient = check_insufficient_evidence(raw_response)
+    is_citation_complete = check_citation_completeness(raw_response, valid_citations, is_insufficient)
 
     return AnswerResult(
         answer=raw_response.strip(),
         citations=valid_citations,
+        validated_citations=validated_objects,
         grounded=is_grounded,
+        citation_complete=is_citation_complete,
+        has_missing_citations=not is_citation_complete,
         insufficient_evidence=is_insufficient,
         unsupported_citations=unsupported_citations,
         evidence_clause_ids=sorted(list(allowed_ids)),
@@ -357,18 +543,19 @@ if __name__ == "__main__":
             pass
 
     print("=" * 70)
-    print("Grounded Answer Generation Demonstration (with Temporal Versioning)")
+    print("Grounded Answer Generation Demonstration (with Robust Citations)")
     print("=" * 70)
 
     retriever = PolicyRetriever()
 
     demo_questions = [
-        "What is the deadline for reporting a change of circumstances that occurred on 10 February 2026?",
-        "What is the deadline for reporting a change of circumstances that occurred on 15 April 2026?",
+        "What is the deadline for reporting a change?",
+        "What is the earnings disregard?",
+        "What is the reporting deadline for a change occurring on 10 February 2026?",
+        "What is the reporting deadline for a change occurring on 15 April 2026?",
         "What is the earnings disregard for a determination made on 15 March 2026?",
         "A change occurred on 20 February 2026 and the determination was made on 20 March 2026. What reporting deadline applies?",
         "The claim was from January 2026 but the determination was made on 20 March 2026. What earnings disregard applies?",
-        "What is the deadline for reporting a change of circumstances?",
     ]
 
     for demo_question in demo_questions:
@@ -383,31 +570,42 @@ if __name__ == "__main__":
         else:
             # Deterministic mock simulation for offline verification
             def mock_llm(p: str) -> str:
-                if "20 february 2026" in p.lower() and "20 march 2026" in p.lower():
+                q_part = p
+                if "USER QUESTION:" in p:
+                    q_part = p.split("USER QUESTION:")[-1].split("POLICY EVIDENCE:")[0]
+                q_low = q_part.lower()
+
+                if "20 february 2026" in q_low and "20 march 2026" in q_low:
                     return (
                         "Under Amendment No. 2026-01 §5.2, because the change of circumstances occurred on 20 February 2026 "
                         "(before 1 March 2026), the pre-amendment reporting deadline applies regardless of the determination date. "
                         "Under §4.3.2, the recipient must report the change within **10 calendar days**."
                     )
-                elif "january 2026" in p.lower() and "20 march 2026" in p.lower():
+                elif "january 2026" in q_low and "20 march 2026" in q_low:
                     return (
                         "Under Amendment No. 2026-01 §5.1, amendments apply to any determination made on or after 1 March 2026, "
                         "even for a prior period such as January 2026. Therefore, under §6.4.1 as amended, the earnings disregard is **$175 per month**."
                     )
-                elif "10 february 2026" in p.lower():
+                elif "10 february 2026" in q_low:
                     return (
                         "For a change of circumstances occurring on 10 February 2026, the pre-amendment deadline applies under "
                         "Amendment No. 2026-01 §5.2. Under §4.3.2, the recipient must report the change within **10 calendar days**."
                     )
-                elif "15 april 2026" in p.lower():
+                elif "15 april 2026" in q_low:
                     return (
                         "For a change of circumstances occurring on 15 April 2026, the amended deadline applies under "
                         "Amendment No. 2026-01 §2.1 and §5.2. Under §4.3.2 as amended, the recipient must report within **14 calendar days**."
                     )
-                elif "15 march 2026" in p.lower():
+                elif "15 march 2026" in q_low:
                     return (
                         "For a determination made on 15 March 2026, the amended earnings disregard applies under "
                         "Amendment No. 2026-01 §1.1 and §5.1. Under §6.4.1(a), the first **$175 per month** of earnings is disregarded."
+                    )
+                elif "disregard" in q_low or "earnings" in q_low:
+                    return (
+                        "Under the original policy manual (§6.4.1), the first **$120 per month** of earnings is disregarded. "
+                        "Effective 1 March 2026 under Amendment No. 2026-01 §1.1, the disregard is increased to **$175 per month**. "
+                        "Under Amendment No. 2026-01 §5.1, the $175 disregard applies to any determination made on or after 1 March 2026."
                     )
                 else:
                     return (
@@ -418,9 +616,14 @@ if __name__ == "__main__":
 
             result = generate_answer(demo_question, retrieved, client=mock_llm)
 
+        extracted_cits = extract_citations(result.answer)
         print("\nGenerated Answer:")
         print(result.answer)
+        print(f"Extracted Citations: {extracted_cits}")
         print(f"Validated Citations: {result.citations}")
+        print(f"Validated Citation Objects: {[str(vc) for vc in result.validated_citations]}")
+        print(f"Unsupported Citations: {result.unsupported_citations}")
+        print(f"Citation Completeness: {result.citation_complete}")
         print(f"Grounded Status: {result.grounded}")
         print(f"Temporal Status: {result.temporal_context.status.value if result.temporal_context else None}")
         print("-" * 70)

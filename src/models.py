@@ -91,3 +91,36 @@ class AmendmentProvision:
     text: str
     effective_date: str = "2026-03-01"
     transitional_rule: Optional[str] = None
+
+
+@dataclass
+class PolicyCitation:
+    """
+    Represents a structured, validated policy citation traced directly to retrieved evidence.
+    """
+    citation_id: str
+    source_document: str
+    clause_id: str
+    clause_title: Optional[str] = None
+    clause_text: Optional[str] = None
+    is_amendment: bool = False
+    is_transitional: bool = False
+    amended_by: Optional[str] = None
+    transitional_rule: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Converts the PolicyCitation into a serializable dictionary."""
+        return {
+            "citation_id": self.citation_id,
+            "source_document": self.source_document,
+            "clause_id": self.clause_id,
+            "clause_title": self.clause_title,
+            "is_amendment": self.is_amendment,
+            "is_transitional": self.is_transitional,
+            "amended_by": self.amended_by,
+            "transitional_rule": self.transitional_rule,
+        }
+
+    def __str__(self) -> str:
+        doc_str = f" [{self.source_document}]" if self.source_document else ""
+        return f"{self.citation_id}{doc_str}"

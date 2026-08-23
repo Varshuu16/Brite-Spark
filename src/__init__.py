@@ -2,7 +2,7 @@
 BriteSpark Problem 1 — Deterministic Policy Engine & Grounded Answer System
 """
 
-from .models import PolicyClause, AmendmentProvision
+from .models import PolicyClause, AmendmentProvision, PolicyCitation
 from .loader import load_policy, load_amendment, load_full_policy_corpus, get_clause_by_id
 from .retriever import PolicyRetriever, ScoredClause
 from .temporal import (
@@ -18,12 +18,15 @@ from .answer import (
     generate_answer,
     build_grounded_prompt,
     validate_citations,
+    validate_citations_detailed,
     extract_citations,
+    check_citation_completeness,
 )
 
 __all__ = [
     "PolicyClause",
     "AmendmentProvision",
+    "PolicyCitation",
     "load_policy",
     "load_amendment",
     "load_full_policy_corpus",
@@ -40,5 +43,7 @@ __all__ = [
     "generate_answer",
     "build_grounded_prompt",
     "validate_citations",
+    "validate_citations_detailed",
     "extract_citations",
+    "check_citation_completeness",
 ]
