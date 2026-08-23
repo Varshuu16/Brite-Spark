@@ -62,7 +62,8 @@ def detect_conflicts(
     has_432 = "4.3.2" in clause_by_id
     has_914 = "9.1.4" in clause_by_id
 
-    if has_432 and has_914:
+    is_date_unspecified = t_ctx is None or t_ctx.status == TemporalStatus.UNSPECIFIED
+    if has_432 and has_914 and is_date_unspecified:
         c432 = clause_by_id["4.3.2"][0]
         c914 = clause_by_id["9.1.4"][0]
 

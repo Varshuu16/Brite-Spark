@@ -100,3 +100,27 @@ We introduced a dedicated, deterministic conflict detection module (`src/conflic
 3. **Transparent Answer Generation & Citation Validation:**
    - When a conflict is detected, the prompt instructs Gemini to explicitly describe the discrepancy, cite both conflicting clauses, and state that the provided evidence does not establish precedence.
    - All cited conflicting clauses must be present in retrieved evidence, maintaining full grounding (`grounded = True`, `conflicts_detected = True`).
+
+---
+
+### 8. Deterministic Multi-Dimensional Evaluation Framework (Part 7)
+
+#### Context:
+Evaluating an administrative policy AI requires rigorous verification across retrieval accuracy, temporal reasoning, citation traceability, refusal safety, and conflict detection. Relying solely on live generative LLM calls for evaluation introduces non-determinism, network flakiness, latency, and uncontrolled prompt drift.
+
+#### Decision:
+We established a comprehensive deterministic evaluation framework (`tests/evaluation_dataset.py`, `tests/run_evaluation.py`, and `tests/test_evaluation.py`) with 21 structured test cases spanning 15 distinct categories.
+
+#### Core Evaluation Principles:
+1. **Zero-Flake Deterministic Evaluation:**
+   - Core regression and evaluation scoring runs completely offline using controlled mock answer generators and deterministic validators. This guarantees 100% reproducible results without API quotas, rate limits, or network variability.
+2. **Multi-Dimensional Quality Metrics:**
+   - The framework computes 6 distinct deterministic metrics:
+     - **Evidence Retrieval Accuracy:** Expected clause hit rate in top-$k$ results.
+     - **Temporal Classification Accuracy:** Exact classification of legal temporal status (`PRE_AMENDMENT`, `POST_AMENDMENT`, `SPANNING`, `UNSPECIFIED`).
+     - **Citation Validity Rate:** Strict verification that all cited clauses exist in retrieved evidence.
+     - **Citation Completeness Rate:** Verification that substantive policy assertions are supported by citations.
+     - **Refusal Safety Accuracy:** Immediate structured refusal for out-of-domain and zero-evidence queries.
+     - **Conflict Detection Accuracy:** Correct identification of substantive contradictions versus temporal versioning.
+3. **Rejection of Artificial "ML Accuracy" for Generated Prose:**
+   - Rather than computing noisy similarity metrics (e.g. ROUGE, BLEU, or arbitrary LLM-as-judge scores) over natural-language prose, our framework evaluates exact factual constraints: presence of required policy numbers/dates, exact citation strings, absence of hallucinations, and boolean grounding flags.
