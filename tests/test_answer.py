@@ -95,7 +95,7 @@ class TestGroundedAnswer(unittest.TestCase):
         )
 
         self.assertTrue(result.insufficient_evidence)
-        self.assertTrue(result.grounded)
+        self.assertFalse(result.grounded)
 
     def test_no_evidence_fast_refusal(self):
         """Test E: Empty retrieval results return immediate refusal without invoking LLM."""
@@ -114,7 +114,7 @@ class TestGroundedAnswer(unittest.TestCase):
 
         self.assertFalse(called, "LLM must not be called when evidence is empty")
         self.assertTrue(result.insufficient_evidence)
-        self.assertTrue(result.grounded)
+        self.assertFalse(result.grounded)
         self.assertEqual(len(result.citations), 0)
         self.assertIn("insufficient", result.answer.lower())
 
@@ -619,5 +619,165 @@ class TestGroundedAnswer(unittest.TestCase):
         self.assertEqual(vc.source_document, "Amendment No. 2026-01.md")
 
 
+    # =========================================================================
+    # PART 5 ROBUST REFUSAL & INSUFFICIENT EVIDENCE TESTS
+    # =========================================================================
+
+    def test_part5_a_empty_retrieval_fast_refusal(self):
+        """Test Part 5A: Empty retrieval results return immediate refusal without invoking LLM."""
+        called = False
+
+        def failing_mock(prompt: str) -> str:
+            nonlocal called
+            called = True
+            return "Should not be reached"
+
+        result = generate_answer(
+            question="What is the policy on quantum computing?",
+            retrieved_clauses=[],
+            client=failing_mock,
+        )
+
+        self.assertFalse(called, "LLM must not be called when evidence is empty")
+        self.assertTrue(result.insufficient_evidence)
+        self.assertFalse(result.grounded)
+        self.assertEqual(result.citations, [])
+        self.assertEqual(result.validated_citations, [])
+        self.assertEqual(result.unsupported_citations, [])
+        self.assertIn("insufficient", result.answer.lower())
+
+    def test_part5_b_completely_irrelevant_question(self):
+        """Test Part 5B: Completely irrelevant questions return zero retrieved clauses and fast refusal."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        q = "What is the weather in London today?"
+        retrieved = retriever.retrieve(q, top_k=5)
+        self.assertEqual(retrieved, [], "Irrelevant query must retrieve 0 clauses")
+
+        result = generate_answer(q, retrieved)
+        self.assertTrue(result.insufficient_evidence)
+        self.assertFalse(result.grounded)
+        self.assertEqual(result.citations, [])
+
+    def test_part5_c_out_of_domain_question(self):
+        """Test Part 5C: Out-of-domain general knowledge questions are refused without hallucinating."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        out_of_domain_queries = [
+            "What is the capital of France?",
+            "Who is the current president of the United States?",
+            "How do I cook pasta?",
+            "Write a Python program to sort a list.",
+        ]
+
+        def refusal_mock(prompt: str) -> str:
+            return "The provided policy evidence is insufficient to answer this question."
+
+        for q in out_of_domain_queries:
+            retrieved = retriever.retrieve(q, top_k=5)
+            result = generate_answer(q, retrieved, client=refusal_mock)
+            self.assertTrue(result.insufficient_evidence)
+            self.assertFalse(result.grounded)
+            self.assertEqual(result.citations, [])
+
+    def test_part5_d_unsupported_policy_topic(self):
+        """Test Part 5D: If retrieved evidence is unrelated to user question, refusal is returned."""
+        evidence = [self.clause_1_4_6]  # Evidence only about full-time students
+        mock_response = "The provided policy evidence is insufficient to answer how to appeal a property tax assessment."
+
+        result = generate_answer(
+            question="How do I appeal my property tax?",
+            retrieved_clauses=evidence,
+            client=lambda prompt: mock_response,
+        )
+
+        self.assertTrue(result.insufficient_evidence)
+        self.assertFalse(result.grounded)
+        self.assertEqual(result.citations, [])
+        self.assertEqual(result.unsupported_citations, [])
+
+    def test_part5_e_partial_evidence_strict_grounding(self):
+        """Test Part 5E: When evidence supports only part of query, citations are grounded and missing info is not hallucinated."""
+        evidence = [self.clause_4_3_2]
+        mock_response = (
+            "Under §4.3.2, a recipient must report changes within 10 calendar days. "
+            "However, the policy evidence does not contain information regarding child care grants."
+        )
+
+        result = generate_answer(
+            question="What is the reporting deadline and how do I apply for a child care grant?",
+            retrieved_clauses=evidence,
+            client=lambda prompt: mock_response,
+        )
+
+        self.assertTrue(result.grounded)
+        self.assertIn("4.3.2", result.citations)
+        self.assertEqual(result.unsupported_citations, [])
+        self.assertFalse(result.insufficient_evidence)
+
+    def test_part5_f_no_fabricated_citations_in_refusal(self):
+        """Test Part 5F: Refusal responses contain zero valid or unsupported citations."""
+        evidence = []
+        result = generate_answer("Can I get a loan?", evidence)
+
+        self.assertTrue(result.insufficient_evidence)
+        self.assertEqual(result.citations, [])
+        self.assertEqual(result.validated_citations, [])
+        self.assertEqual(result.unsupported_citations, [])
+
+    def test_part5_g_refusal_grounded_safe_contract(self):
+        """Test Part 5G: Refusal response adheres strictly to structured AnswerResult contract."""
+        result = generate_answer("Random question", [])
+
+        self.assertFalse(result.grounded)
+        self.assertTrue(result.insufficient_evidence)
+        self.assertTrue(result.citation_complete)
+        self.assertFalse(result.has_missing_citations)
+        self.assertEqual(result.evidence_clause_ids, [])
+
+        res_dict = result.to_dict()
+        self.assertFalse(res_dict["grounded"])
+        self.assertTrue(res_dict["insufficient_evidence"])
+        self.assertEqual(res_dict["citations"], [])
+
+    def test_part5_h_gemini_invocation_prevention(self):
+        """Test Part 5H: Clear zero-evidence cases produce exactly 0 Gemini/LLM invocations."""
+        call_count = 0
+
+        def counting_client(prompt: str) -> str:
+            nonlocal call_count
+            call_count += 1
+            return "Should not execute"
+
+        result = generate_answer("Unanswerable question", [], client=counting_client)
+        self.assertEqual(call_count, 0, "LLM must be invoked 0 times when no evidence is retrieved")
+        self.assertTrue(result.insufficient_evidence)
+        self.assertFalse(result.grounded)
+
+    def test_part5_i_temporal_insufficient_evidence(self):
+        """Test Part 5I: Date-specific query lacking required amendment evidence yields refusal."""
+        evidence = [self.clause_4_3_2]  # Only original 10-day clause, no Amendment 2026-01
+        mock_response = "The provided policy evidence is insufficient to determine post-amendment reporting rules."
+
+        result = generate_answer(
+            question="What is the deadline for a change on 15 April 2026?",
+            retrieved_clauses=evidence,
+            client=lambda prompt: mock_response,
+        )
+
+        self.assertTrue(result.insufficient_evidence)
+        self.assertFalse(result.grounded)
+        self.assertEqual(result.citations, [])
+
+
 if __name__ == "__main__":
     unittest.main()
+

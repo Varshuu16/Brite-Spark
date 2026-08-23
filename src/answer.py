@@ -440,7 +440,7 @@ def generate_answer(
             answer="The provided policy evidence is insufficient to answer this question.",
             citations=[],
             validated_citations=[],
-            grounded=True,
+            grounded=False,
             citation_complete=True,
             has_missing_citations=False,
             insufficient_evidence=True,
@@ -516,8 +516,15 @@ def generate_answer(
     valid_citations, validated_objects, unsupported_citations, is_grounded = validate_citations_detailed(
         raw_response, retrieved_clauses
     )
-    is_insufficient = check_insufficient_evidence(raw_response)
-    is_citation_complete = check_citation_completeness(raw_response, valid_citations, is_insufficient)
+    is_insufficient = check_insufficient_evidence(raw_response) and len(valid_citations) == 0
+    if is_insufficient:
+        valid_citations = []
+        validated_objects = []
+        unsupported_citations = []
+        is_grounded = False
+        is_citation_complete = True
+    else:
+        is_citation_complete = check_citation_completeness(raw_response, valid_citations, is_insufficient)
 
     return AnswerResult(
         answer=raw_response.strip(),
@@ -548,20 +555,23 @@ if __name__ == "__main__":
 
     retriever = PolicyRetriever()
 
-    demo_questions = [
-        "What is the deadline for reporting a change?",
-        "What is the earnings disregard?",
-        "What is the reporting deadline for a change occurring on 10 February 2026?",
-        "What is the reporting deadline for a change occurring on 15 April 2026?",
-        "What is the earnings disregard for a determination made on 15 March 2026?",
-        "A change occurred on 20 February 2026 and the determination was made on 20 March 2026. What reporting deadline applies?",
-        "The claim was from January 2026 but the determination was made on 20 March 2026. What earnings disregard applies?",
+    demo_scenarios = [
+        ("What is the earnings disregard?", None),
+        ("What is the deadline for reporting a change?", None),
+        ("What is the capital of France?", None),
+        ("What is the weather today?", None),
+        ("How do I appeal my property tax?", [retriever.clauses[0]]),  # Unrelated evidence (§1.4.1)
+        ("What is the deadline for reporting a change occurring on 15 April 2026?", [c for c in retriever.clauses if c.clause_id == "4.3.2" and not c.is_amendment]),  # Missing amendment evidence
     ]
 
-    for demo_question in demo_questions:
+    for demo_question, forced_evidence in demo_scenarios:
         print(f"\nQuestion: {demo_question}\n")
-        retrieved = retriever.retrieve(demo_question, top_k=5)
-        print("Retrieved Clause IDs:", [f"{r.citation}" for r in retrieved])
+        if forced_evidence is not None:
+            retrieved = forced_evidence
+            print("Supplied (Forced) Evidence IDs:", [f"{r.citation}" for r in retrieved])
+        else:
+            retrieved = retriever.retrieve(demo_question, top_k=5)
+            print("Retrieved Clause IDs:", [f"{r.citation}" for r in retrieved])
 
         api_key = os.environ.get("GEMINI_API_KEY")
         if api_key:
@@ -575,16 +585,17 @@ if __name__ == "__main__":
                     q_part = p.split("USER QUESTION:")[-1].split("POLICY EVIDENCE:")[0]
                 q_low = q_part.lower()
 
-                if "20 february 2026" in q_low and "20 march 2026" in q_low:
+                # Check if evidence contains relevant clauses
+                evidence_text = p.split("POLICY EVIDENCE:")[-1].lower() if "POLICY EVIDENCE:" in p else p.lower()
+                if "france" in q_low or "weather" in q_low or "property tax" in q_low:
+                    return "The provided policy evidence is insufficient to answer this question."
+                elif "15 april 2026" in q_low and "amendment 2026-01" not in evidence_text:
+                    return "The provided policy evidence is insufficient to determine post-amendment reporting rules."
+                elif "20 february 2026" in q_low and "20 march 2026" in q_low:
                     return (
                         "Under Amendment No. 2026-01 §5.2, because the change of circumstances occurred on 20 February 2026 "
                         "(before 1 March 2026), the pre-amendment reporting deadline applies regardless of the determination date. "
                         "Under §4.3.2, the recipient must report the change within **10 calendar days**."
-                    )
-                elif "january 2026" in q_low and "20 march 2026" in q_low:
-                    return (
-                        "Under Amendment No. 2026-01 §5.1, amendments apply to any determination made on or after 1 March 2026, "
-                        "even for a prior period such as January 2026. Therefore, under §6.4.1 as amended, the earnings disregard is **$175 per month**."
                     )
                 elif "10 february 2026" in q_low:
                     return (
@@ -595,11 +606,6 @@ if __name__ == "__main__":
                     return (
                         "For a change of circumstances occurring on 15 April 2026, the amended deadline applies under "
                         "Amendment No. 2026-01 §2.1 and §5.2. Under §4.3.2 as amended, the recipient must report within **14 calendar days**."
-                    )
-                elif "15 march 2026" in q_low:
-                    return (
-                        "For a determination made on 15 March 2026, the amended earnings disregard applies under "
-                        "Amendment No. 2026-01 §1.1 and §5.1. Under §6.4.1(a), the first **$175 per month** of earnings is disregarded."
                     )
                 elif "disregard" in q_low or "earnings" in q_low:
                     return (
@@ -625,5 +631,6 @@ if __name__ == "__main__":
         print(f"Unsupported Citations: {result.unsupported_citations}")
         print(f"Citation Completeness: {result.citation_complete}")
         print(f"Grounded Status: {result.grounded}")
+        print(f"Insufficient Evidence: {result.insufficient_evidence}")
         print(f"Temporal Status: {result.temporal_context.status.value if result.temporal_context else None}")
         print("-" * 70)
