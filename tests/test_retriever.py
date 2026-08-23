@@ -5,7 +5,7 @@ Unit tests for the deterministic lexical policy retriever.
 from pathlib import Path
 import unittest
 
-from src.loader import load_policy
+from src.loader import load_policy, load_full_policy_corpus
 from src.retriever import PolicyRetriever, ScoredClause
 
 
@@ -15,7 +15,7 @@ class TestPolicyRetriever(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.policy_path = Path("data/policy-manual.md")
-        cls.clauses = load_policy(cls.policy_path)
+        cls.clauses = load_full_policy_corpus(cls.policy_path, "data/Amendment No. 2026-01.md")
         cls.retriever = PolicyRetriever(clauses=cls.clauses)
 
     def test_direct_match(self):
@@ -143,6 +143,50 @@ class TestPolicyRetriever(unittest.TestCase):
 
         self.assertIn("7.1.1", retrieved_ids)
         self.assertIn("7.2.1", retrieved_ids)
+
+    def test_pre_amendment_retrieval_february_2026(self):
+        """Test C: February 2026 change query retrieves historical 10-day clause as top result."""
+        query = "What is the deadline for reporting a change of circumstances that occurred on 10 February 2026?"
+        results = self.retriever.retrieve(query, top_k=5)
+        self.assertGreater(len(results), 0)
+        top = results[0]
+        self.assertEqual(top.clause_id, "4.3.2")
+        self.assertIn("10 calendar days", top.clause_text)
+        self.assertFalse(top.is_amendment)
+
+    def test_post_amendment_retrieval_april_2026(self):
+        """Test C: April 2026 change query retrieves amended 14-day clause as top result."""
+        query = "What is the deadline for reporting a change of circumstances that occurred on 15 April 2026?"
+        results = self.retriever.retrieve(query, top_k=5)
+        self.assertGreater(len(results), 0)
+        top = results[0]
+        self.assertEqual(top.clause_id, "4.3.2")
+        self.assertIn("14 calendar days", top.clause_text)
+        self.assertTrue(top.is_amendment)
+
+    def test_post_amendment_determination_disregard_march_2026(self):
+        """Test D: March 2026 determination query retrieves amended $175 disregard as top result."""
+        query = "What is the earnings disregard for a determination made on 15 March 2026?"
+        results = self.retriever.retrieve(query, top_k=5)
+        self.assertGreater(len(results), 0)
+        top = results[0]
+        self.assertEqual(top.clause_id, "6.4.1")
+        self.assertIn("$175", top.clause_text)
+        self.assertTrue(top.is_amendment)
+
+    def test_inserted_clause_sanction_exception_10_5_3A(self):
+        """Test I: Query about unreported positive change retrieves inserted clause §10.5.3A."""
+        query = "Can a sanction be imposed if an unreported change would have increased the award?"
+        results = self.retriever.retrieve(query, top_k=5)
+        retrieved_ids = [r.clause_id for r in results]
+        self.assertIn("10.5.3A", retrieved_ids)
+
+    def test_spanning_period_retrieves_5_3_and_apportionment(self):
+        """Test H: Query for claim period spanning 1 March 2026 retrieves Amendment §5.3 and §7.4.3."""
+        query = "How is an award calculated for a claim period spanning from 15 February 2026 to 15 March 2026?"
+        results = self.retriever.retrieve(query, top_k=5)
+        retrieved_ids = [r.clause_id for r in results]
+        self.assertTrue(any("5.3" in cid for cid in retrieved_ids))
 
 
 if __name__ == "__main__":

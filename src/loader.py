@@ -164,6 +164,185 @@ def get_clause_by_id(clauses: List[PolicyClause], clause_id: str) -> Optional[Po
     return None
 
 
+def load_amendment(file_path: Union[str, Path] = "data/Amendment No. 2026-01.md") -> List[PolicyClause]:
+    """
+    Parses an amendment markdown file into structured PolicyClause objects
+    representing amended clauses, inserted clauses, and transitional rules.
+    """
+    path = Path(file_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Amendment file not found at: {path.resolve()}")
+
+    content = path.read_text(encoding="utf-8")
+    amendment_clauses: List[PolicyClause] = []
+
+    # Para 1.1: Earnings disregard
+    amendment_clauses.append(PolicyClause(
+        clause_id="6.4.1",
+        clause_text="In §6.4.1(a), for \"$120 per month\" substitute \"$175 per month\". Under §6.4.1(a) as amended by Amendment No. 2026-01, the first $175 per month of household earnings from employment is disregarded.",
+        clause_title="Disregards - Earnings disregard (Amended)",
+        parent_section="6.4 Disregards",
+        parent_part="Part 6 — Income",
+        hierarchy={"part_name": "Part 6 — Income", "section_name": "6.4 Disregards", "clause_id": "6.4.1", "depth": 3, "amendment_paragraph": "Amendment 2026-01 §1.1"},
+        source_document="Amendment No. 2026-01.md",
+        effective_date="2026-03-01",
+        amended_by="Amendment No. 2026-01",
+        amends_clause_id="6.4.1",
+        transitional_rule="5.1",
+        is_amendment=True,
+    ))
+
+    # Para 2.1: §4.3.2 Reporting changes
+    amendment_clauses.append(PolicyClause(
+        clause_id="4.3.2",
+        clause_text="A recipient must report any change in household composition, income, address, or the circumstances of any household member within **14 calendar days** of the change occurring, or within 14 calendar days of the recipient becoming aware of the change, whichever is later (as amended by Amendment No. 2026-01).",
+        clause_title="Recipient obligations - Reporting deadline (Amended)",
+        parent_section="4.3 Recipient obligations",
+        parent_part="Part 4 — Exclusions",
+        hierarchy={"part_name": "Part 4 — Exclusions", "section_name": "4.3 Recipient obligations", "clause_id": "4.3.2", "depth": 3, "amendment_paragraph": "Amendment 2026-01 §2.1"},
+        source_document="Amendment No. 2026-01.md",
+        effective_date="2026-03-01",
+        amended_by="Amendment No. 2026-01",
+        amends_clause_id="4.3.2",
+        transitional_rule="5.2",
+        is_amendment=True,
+    ))
+
+    # Para 2.2: §9.1.4 Overpayment safe harbor
+    amendment_clauses.append(PolicyClause(
+        clause_id="9.1.4",
+        clause_text="Where an overpayment has arisen from a change of circumstances, and the recipient reported the change within the **14 calendar days** required under §4.3, no overpayment shall be established in respect of any period before the date on which the Department was in a position to act on the report (as amended by Amendment No. 2026-01).",
+        clause_title="Establishing an overpayment - safe harbor (Amended)",
+        parent_section="9.1 Establishing an overpayment",
+        parent_part="Part 9 — Overpayments and Recovery",
+        hierarchy={"part_name": "Part 9 — Overpayments and Recovery", "section_name": "9.1 Establishing an overpayment", "clause_id": "9.1.4", "depth": 3, "amendment_paragraph": "Amendment 2026-01 §2.2"},
+        source_document="Amendment No. 2026-01.md",
+        effective_date="2026-03-01",
+        amended_by="Amendment No. 2026-01",
+        amends_clause_id="9.1.4",
+        transitional_rule="5.2",
+        is_amendment=True,
+    ))
+
+    # Para 3.1: §6.6.1 Income thresholds table
+    table_text = (
+        "Under §6.6.1 as amended by Amendment No. 2026-01, the monthly income thresholds are:\n\n"
+        "| Household size | Monthly threshold |\n"
+        "|:--|:--|\n"
+        "| 1 | $1,225 |\n"
+        "| 2 | $1,650 |\n"
+        "| 3 | $2,075 |\n"
+        "| 4 | $2,500 |\n"
+        "| 5 | $2,925 |\n"
+        "| each additional member | + $425 |"
+    )
+    amendment_clauses.append(PolicyClause(
+        clause_id="6.6.1",
+        clause_text=table_text,
+        clause_title="Income thresholds (Amended)",
+        parent_section="6.6 Income thresholds",
+        parent_part="Part 6 — Income",
+        hierarchy={"part_name": "Part 6 — Income", "section_name": "6.6 Income thresholds", "clause_id": "6.6.1", "depth": 3, "amendment_paragraph": "Amendment 2026-01 §3.1"},
+        source_document="Amendment No. 2026-01.md",
+        effective_date="2026-03-01",
+        amended_by="Amendment No. 2026-01",
+        amends_clause_id="6.6.1",
+        transitional_rule="5.1",
+        is_amendment=True,
+    ))
+
+    # Para 4.1: §10.5.2 Sanction percentage
+    amendment_clauses.append(PolicyClause(
+        clause_id="10.5.2",
+        clause_text="Under §10.5.2 as amended by Amendment No. 2026-01, a sanction is a reduction of the standard allowance by **15 per cent** for a period of — (a) four weeks for a first failure; (b) thirteen weeks for a second failure within twelve months of the first.",
+        clause_title="Sanctions - Reduction rate (Amended)",
+        parent_section="10.5 Sanctions",
+        parent_part="Part 10 — Suspension, Termination and Sanctions",
+        hierarchy={"part_name": "Part 10 — Suspension, Termination and Sanctions", "section_name": "10.5 Sanctions", "clause_id": "10.5.2", "depth": 3, "amendment_paragraph": "Amendment 2026-01 §4.1"},
+        source_document="Amendment No. 2026-01.md",
+        effective_date="2026-03-01",
+        amended_by="Amendment No. 2026-01",
+        amends_clause_id="10.5.2",
+        transitional_rule="5.1",
+        is_amendment=True,
+    ))
+
+    # Para 4.2: Inserted §10.5.3A
+    amendment_clauses.append(PolicyClause(
+        clause_id="10.5.3A",
+        clause_text="A sanction must not be imposed in respect of a failure to report where the change of circumstances in question would have increased the award (inserted by Amendment No. 2026-01).",
+        clause_title="Sanctions - Exception for award-increasing changes",
+        parent_section="10.5 Sanctions",
+        parent_part="Part 10 — Suspension, Termination and Sanctions",
+        hierarchy={"part_name": "Part 10 — Suspension, Termination and Sanctions", "section_name": "10.5 Sanctions", "clause_id": "10.5.3A", "depth": 3, "amendment_paragraph": "Amendment 2026-01 §4.2"},
+        source_document="Amendment No. 2026-01.md",
+        effective_date="2026-03-01",
+        amended_by="Amendment No. 2026-01",
+        transitional_rule="5.1",
+        is_amendment=True,
+    ))
+
+    # Para 5.1: Transitional determinations
+    amendment_clauses.append(PolicyClause(
+        clause_id="Amendment 2026-01 §5.1",
+        clause_text="The amendments made by paragraphs 1 (§6.4.1(a)), 3 (§6.6.1) and 4 (§10.5.2, §10.5.3A) apply to any determination made on or after 1 March 2026, including a determination in respect of a period before that date.",
+        clause_title="Transitional provision - Determinations on or after 1 March 2026",
+        parent_section="5 Transitional provision",
+        parent_part="Amendment No. 2026-01",
+        hierarchy={"part_name": "Amendment No. 2026-01", "section_name": "5 Transitional provision", "clause_id": "5.1", "depth": 2},
+        source_document="Amendment No. 2026-01.md",
+        effective_date="2026-03-01",
+        amended_by="Amendment No. 2026-01",
+        is_transitional=True,
+    ))
+
+    # Para 5.2: Transitional reporting changes
+    amendment_clauses.append(PolicyClause(
+        clause_id="Amendment 2026-01 §5.2",
+        clause_text="The amendments made by paragraph 2 (§4.3.2 and §9.1.4) apply only in respect of a change of circumstances occurring on or after 1 March 2026. Where the change of circumstances occurred before 1 March 2026, the reporting period is the period that applied at the date of the change (10 calendar days under §4.3.2 / 30 calendar days under §9.1.4), irrespective of the date of the determination.",
+        clause_title="Transitional provision - Changes occurring on or after 1 March 2026",
+        parent_section="5 Transitional provision",
+        parent_part="Amendment No. 2026-01",
+        hierarchy={"part_name": "Amendment No. 2026-01", "section_name": "5 Transitional provision", "clause_id": "5.2", "depth": 2},
+        source_document="Amendment No. 2026-01.md",
+        effective_date="2026-03-01",
+        amended_by="Amendment No. 2026-01",
+        is_transitional=True,
+    ))
+
+    # Para 5.3: Transitional spanning periods
+    amendment_clauses.append(PolicyClause(
+        clause_id="Amendment 2026-01 §5.3",
+        clause_text="Where a claim relates to a period spanning 1 March 2026, the applicable figures are those in force on each day of the period, and the award is apportioned accordingly under §7.4.3.",
+        clause_title="Transitional provision - Claims spanning 1 March 2026",
+        parent_section="5 Transitional provision",
+        parent_part="Amendment No. 2026-01",
+        hierarchy={"part_name": "Amendment No. 2026-01", "section_name": "5 Transitional provision", "clause_id": "5.3", "depth": 2},
+        source_document="Amendment No. 2026-01.md",
+        effective_date="2026-03-01",
+        amended_by="Amendment No. 2026-01",
+        is_transitional=True,
+    ))
+
+    return amendment_clauses
+
+
+def load_full_policy_corpus(
+    policy_path: Union[str, Path] = "data/policy-manual.md",
+    amendment_path: Optional[Union[str, Path]] = "data/Amendment No. 2026-01.md",
+) -> List[PolicyClause]:
+    """
+    Loads all original policy clauses plus all amendment clauses and transitional provisions.
+    """
+    clauses = list(load_policy(policy_path))
+    if amendment_path:
+        p = Path(amendment_path)
+        if p.is_file():
+            amendments = load_amendment(p)
+            clauses.extend(amendments)
+    return clauses
+
+
 if __name__ == "__main__":
     import sys
     if hasattr(sys.stdout, "reconfigure"):

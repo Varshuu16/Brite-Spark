@@ -122,6 +122,50 @@ class TestPolicyParser(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             load_policy("data/non_existent_policy_file.md")
 
+    def test_load_amendment_provisions(self):
+        """Test that Amendment No. 2026-01 is parsed accurately into discrete provisions."""
+        from src.loader import load_amendment
+        amendments = load_amendment("data/Amendment No. 2026-01.md")
+        self.assertGreaterEqual(len(amendments), 8)
+
+        amend_map = {c.clause_id: c for c in amendments}
+
+        # 1. Earnings disregard amended to $175
+        self.assertIn("6.4.1", amend_map)
+        self.assertIn("$175", amend_map["6.4.1"].clause_text)
+        self.assertEqual(amend_map["6.4.1"].effective_date, "2026-03-01")
+
+        # 2. Reporting deadline amended to 14 calendar days
+        self.assertIn("4.3.2", amend_map)
+        self.assertIn("14 calendar days", amend_map["4.3.2"].clause_text)
+
+        # 3. Overpayment safe harbor amended to 14 calendar days
+        self.assertIn("9.1.4", amend_map)
+        self.assertIn("14 calendar days", amend_map["9.1.4"].clause_text)
+
+        # 4. Income thresholds table amended
+        self.assertIn("6.6.1", amend_map)
+        self.assertIn("$1,225", amend_map["6.6.1"].clause_text)
+
+        # 5. Sanctions rate amended to 15 per cent
+        self.assertIn("10.5.2", amend_map)
+        self.assertIn("15 per cent", amend_map["10.5.2"].clause_text)
+
+        # 6. Inserted §10.5.3A
+        self.assertIn("10.5.3A", amend_map)
+        self.assertIn("increased the award", amend_map["10.5.3A"].clause_text)
+
+        # 7. Transitional provisions §5.1, §5.2, §5.3
+        self.assertIn("Amendment 2026-01 §5.1", amend_map)
+        self.assertIn("Amendment 2026-01 §5.2", amend_map)
+        self.assertIn("Amendment 2026-01 §5.3", amend_map)
+
+    def test_load_full_policy_corpus(self):
+        """Test unified corpus loading includes 148 original clauses + amendment provisions."""
+        from src.loader import load_full_policy_corpus
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        self.assertEqual(len(corpus), 148 + 9)
+
 
 if __name__ == "__main__":
     unittest.main()

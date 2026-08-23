@@ -188,6 +188,275 @@ class TestGroundedAnswer(unittest.TestCase):
         self.assertIn("timed out", result.answer)
         self.assertEqual(result.citations, [])
 
+    def test_temporal_answer_february_2026_reporting(self):
+        """Test C: February 2026 change generates grounded answer with 10-day deadline."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        question = "What is the deadline for reporting a change of circumstances that occurred on 10 February 2026?"
+        retrieved = retriever.retrieve(question, top_k=4)
+
+        def mock_llm(prompt: str) -> str:
+            return (
+                "For a change of circumstances occurring on 10 February 2026, under Amendment No. 2026-01 §5.2, "
+                "the pre-amendment reporting deadline applies. Under §4.3.2, the recipient must report the change "
+                "within **10 calendar days** of the change occurring."
+            )
+
+        result = generate_answer(question, retrieved, client=mock_llm)
+        self.assertTrue(result.grounded)
+        self.assertIn("4.3.2", result.citations)
+        self.assertIn("10 calendar days", result.answer)
+
+    def test_temporal_answer_april_2026_reporting(self):
+        """Test C: April 2026 change generates grounded answer with amended 14-day deadline."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        question = "What is the deadline for reporting a change of circumstances that occurred on 15 April 2026?"
+        retrieved = retriever.retrieve(question, top_k=4)
+
+        def mock_llm(prompt: str) -> str:
+            return (
+                "For a change of circumstances occurring on 15 April 2026, under §4.3.2 as amended by "
+                "Amendment No. 2026-01 §5.2, the recipient must report within **14 calendar days**."
+            )
+
+        result = generate_answer(question, retrieved, client=mock_llm)
+        self.assertTrue(result.grounded)
+        self.assertIn("4.3.2", result.citations)
+        self.assertIn("14 calendar days", result.answer)
+
+    def test_temporal_answer_transitional_determination_5_1(self):
+        """Test F: Determination made on/after 1 March 2026 applies $175 disregard under §5.1."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        question = "What is the earnings disregard for a determination made on 15 March 2026 for a January 2026 claim?"
+        retrieved = retriever.retrieve(question, top_k=4)
+
+        def mock_llm(prompt: str) -> str:
+            return (
+                "Under Amendment No. 2026-01 §5.1, the amendments apply to any determination made on or after "
+                "1 March 2026, even for prior periods. Therefore, under §6.4.1, the earnings disregard is **$175 per month**."
+            )
+
+        result = generate_answer(question, retrieved, client=mock_llm)
+        self.assertTrue(result.grounded)
+        self.assertIn("6.4.1", result.citations)
+        self.assertIn("$175", result.answer)
+
+    def test_temporal_answer_transitional_reporting_5_2(self):
+        """Test G: Change occurring before 1 March 2026 retains 10-day period even if determined later."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        question = "I moved on 20 February 2026, but the decision is made on 20 March 2026. What reporting deadline applies?"
+        retrieved = retriever.retrieve(question, top_k=4)
+
+        def mock_llm(prompt: str) -> str:
+            return (
+                "Under Amendment No. 2026-01 §5.2, where the change of circumstances occurred before 1 March 2026, "
+                "the reporting period is the period that applied at the date of the change, irrespective of the date of determination. "
+                "Thus, under §4.3.2, the applicable reporting period is **10 calendar days**."
+            )
+
+        result = generate_answer(question, retrieved, client=mock_llm)
+        self.assertTrue(result.grounded)
+        self.assertIn("4.3.2", result.citations)
+        self.assertIn("10 calendar days", result.answer)
+
+    def test_temporal_answer_spanning_period_5_3(self):
+        """Test H: Spanning period claim is apportioned under §5.3 and §7.4.3."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        question = "How is an award calculated for a claim period from 15 February 2026 to 15 March 2026?"
+        retrieved = retriever.retrieve(question, top_k=5)
+
+        def mock_llm(prompt: str) -> str:
+            return (
+                "Under Amendment No. 2026-01 §5.3, where a claim spans 1 March 2026, the figures in force on each day apply "
+                "and the award is apportioned under §7.4.3."
+            )
+
+        result = generate_answer(question, retrieved, client=mock_llm)
+        self.assertTrue(result.grounded)
+        self.assertIn("7.4.3", result.citations)
+
+    def test_temporal_answer_inserted_sanction_exception_10_5_3A(self):
+        """Test I: Positive change that increases award cannot be sanctioned under §10.5.3A."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        question = "Can a sanction be imposed if an unreported change would have increased the award?"
+        retrieved = retriever.retrieve(question, top_k=4)
+
+        def mock_llm(prompt: str) -> str:
+            return (
+                "Under §10.5.3A (inserted by Amendment No. 2026-01), a sanction must not be imposed in respect of a failure "
+                "to report where the change of circumstances in question would have increased the award."
+            )
+
+        result = generate_answer(question, retrieved, client=mock_llm)
+        self.assertTrue(result.grounded)
+        self.assertIn("10.5.3A", result.citations)
+
+    def test_adversarial_1_change_20_feb_det_20_mar(self):
+        """Test 1: Change on 20 Feb 2026, determination 20 Mar 2026 -> 10 calendar days under §5.2."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        q = "A change occurred on 20 February 2026 and the determination was made on 20 March 2026. What reporting deadline applies?"
+        retrieved = retriever.retrieve(q, top_k=4)
+
+        def mock_llm(prompt: str) -> str:
+            return (
+                "Under Amendment No. 2026-01 §5.2, because the change of circumstances occurred on 20 February 2026 "
+                "(before 1 March 2026), the pre-amendment reporting deadline applies regardless of the determination date. "
+                "Under §4.3.2, the recipient must report the change within **10 calendar days**."
+            )
+
+        result = generate_answer(q, retrieved, client=mock_llm)
+        self.assertTrue(result.grounded)
+        self.assertIn("4.3.2", result.citations)
+        self.assertIn("10 calendar days", result.answer)
+
+    def test_adversarial_2_change_20_mar_det_20_feb(self):
+        """Test 2: Change on 20 Mar 2026, determination 20 Feb 2026 -> 14 calendar days under §5.2."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        q = "A change occurred on 20 March 2026 and the determination was made on 20 February 2026. What reporting deadline applies?"
+        retrieved = retriever.retrieve(q, top_k=4)
+
+        def mock_llm(prompt: str) -> str:
+            return (
+                "Under Amendment No. 2026-01 §5.2, because the change occurred on 20 March 2026 (on or after 1 March 2026), "
+                "the amended deadline applies. Under §4.3.2 as amended, the recipient must report within **14 calendar days**."
+            )
+
+        result = generate_answer(q, retrieved, client=mock_llm)
+        self.assertTrue(result.grounded)
+        self.assertIn("4.3.2", result.citations)
+        self.assertIn("14 calendar days", result.answer)
+
+    def test_adversarial_3_claim_jan_det_20_mar(self):
+        """Test 3: Claim period January 2026 and determination made on 20 March 2026 -> $175 disregard under §5.1."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        q = "The claim period was January 2026 and the determination was made on 20 March 2026. What earnings disregard applies?"
+        retrieved = retriever.retrieve(q, top_k=4)
+
+        def mock_llm(prompt: str) -> str:
+            return (
+                "Under Amendment No. 2026-01 §5.1, amendments apply to any determination made on or after 1 March 2026, "
+                "even for a prior period such as January 2026. Therefore, under §6.4.1 as amended, the earnings disregard is **$175 per month**."
+            )
+
+        result = generate_answer(q, retrieved, client=mock_llm)
+        self.assertTrue(result.grounded)
+        self.assertIn("6.4.1", result.citations)
+        self.assertIn("$175", result.answer)
+
+    def test_adversarial_4_det_20_feb_claim_jan(self):
+        """Test 4: Determination made on 20 February 2026 for January claim -> $120 disregard."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        q = "The determination was made on 20 February 2026 for a January 2026 claim. What earnings disregard applies?"
+        retrieved = retriever.retrieve(q, top_k=4)
+
+        def mock_llm(prompt: str) -> str:
+            return (
+                "Because the determination was made on 20 February 2026 (prior to 1 March 2026), under Amendment No. 2026-01 §5.1 "
+                "the pre-amendment disregard applies. Under §6.4.1, the earnings disregard is **$120 per month**."
+            )
+
+        result = generate_answer(q, retrieved, client=mock_llm)
+        self.assertTrue(result.grounded)
+        self.assertIn("6.4.1", result.citations)
+        self.assertIn("$120", result.answer)
+
+    def test_adversarial_5_unspecified_disregard_both_rules(self):
+        """Test 5: Unspecified earnings disregard query generates both historical and current rules."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        q = "How much is the earnings disregard?"
+        retrieved = retriever.retrieve(q, top_k=4)
+
+        def mock_llm(prompt: str) -> str:
+            return (
+                "Under the original policy manual (§6.4.1), the first **$120 per month** of earnings is disregarded. "
+                "Under Amendment No. 2026-01 §1.1, the disregard is increased to **$175 per month**. "
+                "Under Amendment No. 2026-01 §5.1, the $175 disregard applies to any determination made on or after 1 March 2026."
+            )
+
+        result = generate_answer(q, retrieved, client=mock_llm)
+        self.assertTrue(result.grounded)
+        self.assertIn("6.4.1", result.citations)
+        self.assertIn("$120", result.answer)
+        self.assertIn("$175", result.answer)
+
+    def test_adversarial_6_unspecified_reporting_both_rules(self):
+        """Test 6: Unspecified reporting query generates both 10-day and 14-day rules with §5.2 explanation."""
+        from src.loader import load_full_policy_corpus
+        from src.retriever import PolicyRetriever
+
+        corpus = load_full_policy_corpus("data/policy-manual.md", "data/Amendment No. 2026-01.md")
+        retriever = PolicyRetriever(clauses=corpus)
+
+        q = "What is the reporting deadline?"
+        retrieved = retriever.retrieve(q, top_k=4)
+
+        def mock_llm(prompt: str) -> str:
+            return (
+                "Prior to 1 March 2026, a recipient must report changes within **10 calendar days** under §4.3.2. "
+                "Effective 1 March 2026 under Amendment No. 2026-01 §2.1, the reporting period is **14 calendar days**. "
+                "Under Amendment No. 2026-01 §5.2, the 14-day rule applies only to changes occurring on or after 1 March 2026."
+            )
+
+        result = generate_answer(q, retrieved, client=mock_llm)
+        self.assertTrue(result.grounded)
+        self.assertIn("4.3.2", result.citations)
+        self.assertIn("10 calendar days", result.answer)
+        self.assertIn("14 calendar days", result.answer)
+
 
 if __name__ == "__main__":
     unittest.main()

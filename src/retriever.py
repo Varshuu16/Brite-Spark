@@ -1,6 +1,7 @@
 """
 Deterministic Lexical Policy Retriever using BM25 with multi-field weighting,
-Porter stemming, concept expansion, cross-reference graph propagation, and proximity scoring.
+Porter stemming, concept expansion, cross-reference graph propagation, proximity scoring,
+and temporal policy versioning.
 """
 
 from collections import defaultdict
@@ -12,10 +13,12 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 try:
     from .models import PolicyClause
-    from .loader import load_policy
+    from .loader import load_policy, load_full_policy_corpus
+    from .temporal import TemporalContext, TemporalStatus, extract_temporal_context
 except ImportError:
     from models import PolicyClause
-    from loader import load_policy
+    from loader import load_policy, load_full_policy_corpus
+    from temporal import TemporalContext, TemporalStatus, extract_temporal_context
 
 
 # Standard English stopwords to filter out non-informative noise words
@@ -259,6 +262,22 @@ class ScoredClause:
     def parent_part(self) -> Optional[str]:
         return self.clause.parent_part
 
+    @property
+    def effective_date(self) -> Optional[str]:
+        return self.clause.effective_date
+
+    @property
+    def amended_by(self) -> Optional[str]:
+        return self.clause.amended_by
+
+    @property
+    def is_amendment(self) -> bool:
+        return self.clause.is_amendment
+
+    @property
+    def is_transitional(self) -> bool:
+        return self.clause.is_transitional
+
     def to_dict(self) -> Dict[str, Any]:
         data = self.clause.to_dict()
         data["score"] = round(self.score, 4)
@@ -266,19 +285,21 @@ class ScoredClause:
 
     def __str__(self) -> str:
         title_info = f" ({self.clause_title})" if self.clause_title else ""
-        return f"[{self.citation}{title_info} | Score: {self.score:.4f}] {self.clause_text[:100]}..."
+        amend_info = f" [{self.amended_by}]" if self.amended_by else ""
+        return f"[{self.citation}{title_info}{amend_info} | Score: {self.score:.4f}] {self.clause_text[:100]}..."
 
 
 class PolicyRetriever:
     """
     Deterministic Lexical BM25 retriever with multi-field weighting, concept expansion,
-    cross-reference citation graph propagation, and phrase proximity scoring.
+    cross-reference citation graph propagation, phrase proximity scoring, and temporal versioning.
     """
 
     def __init__(
         self,
         clauses: Optional[List[PolicyClause]] = None,
         policy_path: Union[str, Path] = "data/policy-manual.md",
+        amendment_path: Optional[Union[str, Path]] = "data/Amendment No. 2026-01.md",
         k1: float = 1.2,
         b: float = 0.75,
         min_score: float = 0.5,
@@ -289,6 +310,7 @@ class PolicyRetriever:
         Args:
             clauses: Optional pre-loaded list of PolicyClause objects.
             policy_path: Path to load policy clauses from if clauses not provided.
+            amendment_path: Path to amendment file to include in corpus if available.
             k1: BM25 term frequency saturation parameter.
             b: BM25 document length normalization parameter.
             min_score: Default minimum relevance threshold for returning results.
@@ -296,7 +318,7 @@ class PolicyRetriever:
         if clauses is not None:
             self.clauses = clauses
         else:
-            self.clauses = load_policy(policy_path)
+            self.clauses = load_full_policy_corpus(policy_path, amendment_path)
 
         self.k1 = k1
         self.b = b
@@ -318,7 +340,7 @@ class PolicyRetriever:
         self.doc_tokens: List[List[str]] = []
         self.doc_lengths: List[float] = []
         self.df: Dict[str, int] = {}
-        self.clause_index: Dict[str, int] = {}
+        self.clause_index: Dict[str, List[int]] = defaultdict(list)
         self.section_to_clause_indices: Dict[str, List[int]] = defaultdict(list)
         self.cross_refs: Dict[int, List[str]] = {}
 
@@ -328,7 +350,7 @@ class PolicyRetriever:
         total_length = 0.0
 
         for idx, clause in enumerate(self.clauses):
-            self.clause_index[clause.clause_id] = idx
+            self.clause_index[clause.clause_id].append(idx)
             sec_num = clause.hierarchy.get("section_number")
             if sec_num:
                 self.section_to_clause_indices[sec_num].append(idx)
@@ -423,14 +445,16 @@ class PolicyRetriever:
         query: str,
         top_k: int = 5,
         min_score: Optional[float] = None,
+        temporal_context: Optional[TemporalContext] = None,
     ) -> List[ScoredClause]:
         """
-        Scores and ranks policy clauses for the given natural language query.
+        Scores, temporally filters, and ranks policy clauses for the given natural language query.
         
         Args:
             query: The user query string.
             top_k: Maximum number of ranked results to return.
             min_score: Optional override for minimum score threshold.
+            temporal_context: Optional pre-computed TemporalContext.
             
         Returns:
             List of ScoredClause instances sorted by score in descending order.
@@ -440,6 +464,9 @@ class PolicyRetriever:
         base_tokens = tokenize(query, stem=True, remove_stopwords=True)
         if not base_tokens:
             return []
+
+        # Extract or use supplied temporal context
+        t_ctx = temporal_context or extract_temporal_context(query)
 
         # Expand query with generic procedural/legal concept synonyms
         expanded_qtf: Dict[str, float] = {}
@@ -485,24 +512,62 @@ class PolicyRetriever:
                 raw_scores[idx] = total_score
 
         # Step 2: Cross-Reference Citation Graph Propagation
-        # If candidate clauses cite other clauses or sections, propagate relevance to cited targets
         final_scores: Dict[int, float] = dict(raw_scores)
         for idx, score in raw_scores.items():
             if score < 3.0:
                 continue
             refs = self.cross_refs.get(idx, [])
             for ref in refs:
-                # Direct clause reference (e.g. '4.3.2')
+                # Direct clause reference
                 if ref in self.clause_index:
-                    target_idx = self.clause_index[ref]
-                    transfer = score * 0.30
-                    final_scores[target_idx] = final_scores.get(target_idx, 0.0) + transfer
-                # Section reference (e.g. '4.3' -> clauses '4.3.1', '4.3.2', ...)
+                    for target_idx in self.clause_index[ref]:
+                        transfer = score * 0.30
+                        final_scores[target_idx] = final_scores.get(target_idx, 0.0) + transfer
+                # Section reference
                 elif ref in self.section_to_clause_indices:
                     sec_indices = self.section_to_clause_indices[ref]
                     transfer = (score * 0.25) / max(len(sec_indices), 1)
                     for target_idx in sec_indices:
                         final_scores[target_idx] = final_scores.get(target_idx, 0.0) + transfer
+
+        # Step 3: Temporal Priority Adjustment
+        # Boost appropriate clause version based on temporal context
+        for idx, clause in enumerate(self.clauses):
+            if idx not in final_scores:
+                continue
+
+            current_score = final_scores[idx]
+
+            if t_ctx.status == TemporalStatus.PRE_AMENDMENT:
+                # Historical query: prioritize original manual clauses
+                if not clause.is_amendment:
+                    final_scores[idx] = current_score * 1.35
+                elif clause.is_transitional:
+                    final_scores[idx] = current_score * 1.10
+                else:
+                    final_scores[idx] = current_score * 0.75
+
+                if t_ctx.applicable_transitional_rule and clause.clause_id == f"Amendment 2026-01 §{t_ctx.applicable_transitional_rule}":
+                    final_scores[idx] += 25.0
+
+            elif t_ctx.status == TemporalStatus.POST_AMENDMENT:
+                # Current/amended query: prioritize amended version & inserted clauses
+                if clause.is_amendment and not clause.is_transitional:
+                    final_scores[idx] = current_score * 1.45
+                elif clause.is_transitional:
+                    final_scores[idx] = current_score * 1.15
+
+                if t_ctx.applicable_transitional_rule and clause.clause_id == f"Amendment 2026-01 §{t_ctx.applicable_transitional_rule}":
+                    final_scores[idx] += 25.0
+
+            elif t_ctx.status == TemporalStatus.SPANNING:
+                # Spanning query: elevate transitional spanning provision §5.3 and §7.4.3
+                if clause.clause_id == "Amendment 2026-01 §5.3" or clause.clause_id == "7.4.3":
+                    final_scores[idx] = current_score + 25.0
+            elif t_ctx.status == TemporalStatus.UNSPECIFIED:
+                # When date unspecified, ensure both versions score well and transitional rules are present
+                if clause.is_transitional:
+                    final_scores[idx] = current_score * 1.10
 
         # Filter by threshold
         qualified: List[Tuple[int, float]] = [
@@ -521,7 +586,6 @@ class PolicyRetriever:
 
 if __name__ == "__main__":
     import sys
-    # Ensure UTF-8 output on Windows
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8")
@@ -531,30 +595,23 @@ if __name__ == "__main__":
     retriever = PolicyRetriever()
 
     demo_queries = [
+        "What is the deadline for reporting a change in February 2026?",
+        "What is the deadline for reporting a change in April 2026?",
+        "What is the earnings disregard for a determination on 15 March 2026?",
         "What is the deadline for reporting a change of circumstances?",
-        "How much is the earnings disregard?",
-        "Who is considered a full-time student?",
-        "What happens if an overpayment was caused by Department error?",
     ]
 
     print("=" * 70)
-    print("Policy Retriever Demonstration (Enhanced)")
+    print("Policy Retriever with Temporal Versioning Demonstration")
     print("=" * 70)
 
     for q in demo_queries:
-        print(f"\nQuestion:\n{q}\n")
-        results = retriever.retrieve(q, top_k=5)
+        ctx = extract_temporal_context(q)
+        print(f"\nQuestion: {q}")
+        print(f"Detected Temporal Status: {ctx.status.value} (Event: {ctx.event_type.value}, Rule: {ctx.applicable_transitional_rule})")
+        results = retriever.retrieve(q, top_k=4)
         print("Retrieved clauses:")
-        if not results:
-            print("  (No matching clauses found above threshold)")
-        else:
-            for rank, res in enumerate(results, 1):
-                preview = res.clause_text.replace("\n", " ")
-                if len(preview) > 110:
-                    preview = preview[:107] + "..."
-                print(f"{rank}. {res.citation} ({res.clause_title or 'Clause'})")
-                print(f"   Score:   {res.score:.4f}")
-                print(f"   Section: {res.parent_section}")
-                print(f"   Part:    {res.parent_part}")
-                print(f"   Preview: {preview}\n")
+        for rank, res in enumerate(results, 1):
+            amend_tag = f" [{res.amended_by}]" if res.amended_by else " [Original]"
+            print(f" {rank}. {res.citation}{amend_tag} (Score: {res.score:.4f}): {res.clause_text[:75]}...")
         print("-" * 70)
