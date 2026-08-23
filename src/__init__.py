@@ -2,7 +2,7 @@
 BriteSpark Problem 1 — Deterministic Policy Engine & Grounded Answer System
 """
 
-from .models import PolicyClause, AmendmentProvision, PolicyCitation
+from .models import PolicyClause, AmendmentProvision, PolicyCitation, PolicyConflict
 from .loader import load_policy, load_amendment, load_full_policy_corpus, get_clause_by_id
 from .retriever import PolicyRetriever, ScoredClause
 from .temporal import (
@@ -11,6 +11,7 @@ from .temporal import (
     QueryEventType,
     extract_temporal_context,
 )
+from .conflict import detect_conflicts
 from .answer import (
     DEFAULT_GEMINI_MODEL,
     DEFAULT_TIMEOUT_SECONDS,
@@ -27,6 +28,7 @@ __all__ = [
     "PolicyClause",
     "AmendmentProvision",
     "PolicyCitation",
+    "PolicyConflict",
     "load_policy",
     "load_amendment",
     "load_full_policy_corpus",
@@ -37,6 +39,7 @@ __all__ = [
     "TemporalStatus",
     "QueryEventType",
     "extract_temporal_context",
+    "detect_conflicts",
     "DEFAULT_GEMINI_MODEL",
     "DEFAULT_TIMEOUT_SECONDS",
     "AnswerResult",

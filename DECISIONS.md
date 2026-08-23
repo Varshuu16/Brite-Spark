@@ -81,3 +81,22 @@ When a user does not specify a date (e.g. "What is the earnings disregard?"), th
    - We would have designed `PolicyClause` from the start with `valid_from` and `valid_to` timestamps and built an interval-tree index in `PolicyRetriever` for $O(1)$ point-in-time point queries.
 2. **Graph-Based Delta Patching:**
    - Rather than loading amendments as parallel clause lists, we would have implemented a formal Policy Graph where amendments attach as edge revisions with condition predicates (`determination_date >= 2026-03-01`).
+
+---
+
+### 7. Deterministic Substantive Policy Conflict Handling (Part 6)
+
+#### Context:
+Policy corpora often contain contradictory provisions across different administrative chapters (e.g. §4.3.2 establishing a 10-day reporting deadline vs §9.1.4 referencing 30 calendar days for overpayment notifications, or general sanction rules vs statutory exceptions). The system must never silently choose one rule or hallucinate precedence without evidence.
+
+#### Decision:
+We introduced a dedicated, deterministic conflict detection module (`src/conflict.py`) and a structured `PolicyConflict` data model.
+
+#### Architectural Principles:
+1. **Separation of Temporal Evolution from Substantive Conflict:**
+   - Pre-amendment vs post-amendment version differences (e.g. §4.3.2 original 10-day vs amended 14-day rule) are resolved by the temporal engine (`§5.1`, `§5.2`, `§5.3`). These are tracked as chronological temporal versions, NOT unresolved conflicts.
+2. **Deterministic Contradiction Detection:**
+   - Evaluates retrieved clauses for direct numeric discrepancies and sanction conflicts (e.g. sanction imposition vs prohibition under §10.5.3A).
+3. **Transparent Answer Generation & Citation Validation:**
+   - When a conflict is detected, the prompt instructs Gemini to explicitly describe the discrepancy, cite both conflicting clauses, and state that the provided evidence does not establish precedence.
+   - All cited conflicting clauses must be present in retrieved evidence, maintaining full grounding (`grounded = True`, `conflicts_detected = True`).

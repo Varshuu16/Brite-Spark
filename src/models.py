@@ -124,3 +124,35 @@ class PolicyCitation:
     def __str__(self) -> str:
         doc_str = f" [{self.source_document}]" if self.source_document else ""
         return f"{self.citation_id}{doc_str}"
+
+
+@dataclass
+class PolicyConflict:
+    """
+    Represents a detected substantive conflict or contradiction between policy provisions.
+    """
+    conflict_id: str
+    clause_ids: List[str]
+    source_documents: List[str]
+    conflicting_values: Dict[str, str] = field(default_factory=dict)
+    description: str = ""
+    conflict_type: str = "SUBSTANTIVE"  # 'SUBSTANTIVE', 'TEMPORAL_UNRESOLVED', 'SANCTION_DISCREPANCY'
+    resolution_available: bool = False
+    resolution_notes: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Converts the PolicyConflict into a serializable dictionary."""
+        return {
+            "conflict_id": self.conflict_id,
+            "clause_ids": self.clause_ids,
+            "source_documents": self.source_documents,
+            "conflicting_values": self.conflicting_values,
+            "description": self.description,
+            "conflict_type": self.conflict_type,
+            "resolution_available": self.resolution_available,
+            "resolution_notes": self.resolution_notes,
+        }
+
+    def __str__(self) -> str:
+        clauses_str = ", ".join(self.clause_ids)
+        return f"[Conflict {self.conflict_id} | {self.conflict_type} | Clauses: {clauses_str}] {self.description}"

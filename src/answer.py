@@ -1,6 +1,7 @@
 """
 Grounded natural-language answer generation with citation verification,
-evidence traceability, citation completeness analysis, and temporal policy versioning.
+evidence traceability, citation completeness analysis, temporal policy versioning,
+and deterministic substantive conflict detection.
 """
 
 from dataclasses import dataclass, field
@@ -17,15 +18,17 @@ except ImportError:
     HAVE_GEMINI_SDK = False
 
 try:
-    from .models import PolicyClause, PolicyCitation
+    from .models import PolicyClause, PolicyCitation, PolicyConflict
     from .loader import load_policy, load_full_policy_corpus
     from .retriever import PolicyRetriever, ScoredClause
     from .temporal import TemporalContext, TemporalStatus, QueryEventType, extract_temporal_context
+    from .conflict import detect_conflicts
 except ImportError:
-    from models import PolicyClause, PolicyCitation
+    from models import PolicyClause, PolicyCitation, PolicyConflict
     from loader import load_policy, load_full_policy_corpus
     from retriever import PolicyRetriever, ScoredClause
     from temporal import TemporalContext, TemporalStatus, QueryEventType, extract_temporal_context
+    from conflict import detect_conflicts
 
 
 # Default Gemini model and timeout configured for grounded answer generation
@@ -44,13 +47,18 @@ INSUFFICIENT_EVIDENCE_PHRASES = [
     "outside the scope",
     "not mentioned in the policy",
     "policy does not specify",
+    "unsupported by the provided evidence",
+    "no evidence provided",
+    "does not provide information",
+    "policy evidence does not",
 ]
 
 
 @dataclass
 class AnswerResult:
     """
-    Structured outcome of a grounded answer generation attempt with full citation traceability.
+    Structured outcome of a grounded answer generation attempt with full citation traceability
+    and substantive conflict reporting.
     """
     answer: str
     citations: List[str] = field(default_factory=list)
@@ -60,6 +68,9 @@ class AnswerResult:
     citation_complete: bool = True
     has_missing_citations: bool = False
     insufficient_evidence: bool = False
+    conflicts_detected: bool = False
+    conflicts: List[PolicyConflict] = field(default_factory=list)
+    conflict_status: str = "NO_CONFLICT"
     evidence_clause_ids: List[str] = field(default_factory=list)
     raw_response: Optional[str] = None
     temporal_context: Optional[TemporalContext] = None
@@ -74,6 +85,9 @@ class AnswerResult:
             "citation_complete": self.citation_complete,
             "has_missing_citations": self.has_missing_citations,
             "insufficient_evidence": self.insufficient_evidence,
+            "conflicts_detected": self.conflicts_detected,
+            "conflicts": [c.to_dict() for c in self.conflicts],
+            "conflict_status": self.conflict_status,
             "evidence_clause_ids": self.evidence_clause_ids,
             "temporal_status": self.temporal_context.status.value if self.temporal_context else None,
         }
@@ -81,8 +95,9 @@ class AnswerResult:
     def __str__(self) -> str:
         status = "GROUNDED" if self.grounded else "UNGROUNDED"
         complete_str = "COMPLETE" if self.citation_complete else "MISSING CITATIONS"
+        conf_str = "CONFLICT" if self.conflicts_detected else "NO_CONFLICT"
         cits = f"Citations: {self.citations}" if self.citations else "No citations"
-        return f"[{status} | {complete_str} | {cits}]\n{self.answer}"
+        return f"[{status} | {conf_str} | {complete_str} | {cits}]\n{self.answer}"
 
 
 def extract_citations(text: str) -> List[str]:
@@ -137,9 +152,11 @@ def build_grounded_prompt(
     question: str,
     retrieved_clauses: List[Union[PolicyClause, ScoredClause]],
     temporal_context: Optional[TemporalContext] = None,
+    conflicts: Optional[List[PolicyConflict]] = None,
 ) -> str:
     """
-    Constructs a strict grounding prompt containing only the retrieved evidence and temporal instructions.
+    Constructs a strict grounding prompt containing retrieved evidence, temporal instructions,
+    and conflict notices where applicable.
     """
     t_ctx = temporal_context or extract_temporal_context(question)
 
@@ -172,6 +189,17 @@ CRITICAL RULES ON TEMPORAL VALIDITY & AMENDMENTS:
 4. If NO specific date is provided in the question:
    - You MUST clearly explain BOTH rules: (1) the rule in force before 1 March 2026, (2) the current rule effective from 1 March 2026 under Amendment No. 2026-01, and (3) cite the applicable transitional provision (e.g. Amendment §5.1 or §5.2)."""
 
+    conflict_instructions = ""
+    if conflicts:
+        conflict_descriptions = "\n".join(f"- {c.description}" for c in conflicts)
+        conflict_instructions = f"""
+POLICY CONFLICT NOTICE:
+The retrieved policy evidence contains substantive discrepancies or conflicting provisions:
+{conflict_descriptions}
+
+CRITICAL CONFLICT REQUIREMENT:
+If the retrieved evidence contains conflicting substantive rules, you MUST explicitly state that the evidence contains conflicting provisions, cite BOTH conflicting clauses, and NOT arbitrarily choose one rule over the other."""
+
     prompt = f"""You are a helpful, strictly grounded assistant for the Calder County Household Support Program.
 
 CRITICAL INSTRUCTIONS:
@@ -183,6 +211,7 @@ CRITICAL INSTRUCTIONS:
 6. Do NOT fabricate, guess, or invent clause IDs. Only cite clause IDs that appear in the POLICY EVIDENCE.
 
 {temporal_instructions}
+{conflict_instructions}
 
 USER QUESTION:
 {question}
@@ -251,9 +280,11 @@ def validate_citations(
 
     for cid in found_citations:
         clean = cid.lstrip("§").strip().lower()
+        clean_base = re.sub(r"\([a-z]\)", "", clean).strip()
         if (
             cid.lower() in normalized_allowed
             or clean in normalized_allowed
+            or clean_base in normalized_allowed
             or any(clean == a.lstrip("§").strip().lower() for a in normalized_allowed)
             or any(clean in a.lower() for a in normalized_allowed)
         ):
@@ -403,7 +434,7 @@ def generate_answer(
 ) -> AnswerResult:
     """
     Generates a grounded natural-language answer using Gemini, retrieved policy evidence,
-    and rigorous citation verification and traceability.
+    rigorous citation verification, and deterministic conflict detection.
     
     Args:
         question: The user inquiry.
@@ -416,7 +447,7 @@ def generate_answer(
         temporal_context: Optional pre-computed TemporalContext.
         
     Returns:
-        AnswerResult containing answer text, validated citations, and grounding status.
+        AnswerResult containing answer text, validated citations, conflict metadata, and grounding status.
     """
     t_ctx = temporal_context or extract_temporal_context(question)
 
@@ -444,12 +475,24 @@ def generate_answer(
             citation_complete=True,
             has_missing_citations=False,
             insufficient_evidence=True,
+            conflicts_detected=False,
+            conflicts=[],
+            conflict_status="NO_CONFLICT",
             evidence_clause_ids=[],
             raw_response=None,
             temporal_context=t_ctx,
         )
 
-    prompt = build_grounded_prompt(question, retrieved_clauses, temporal_context=t_ctx)
+    # Detect substantive conflicts across retrieved evidence
+    detected_conflicts = detect_conflicts(retrieved_clauses, temporal_context=t_ctx, question=question)
+    has_conflicts = len(detected_conflicts) > 0
+
+    prompt = build_grounded_prompt(
+        question,
+        retrieved_clauses,
+        temporal_context=t_ctx,
+        conflicts=detected_conflicts if has_conflicts else None,
+    )
     effective_model = model or os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
     http_opts = types.HttpOptions(timeout=int(timeout_seconds * 1000)) if HAVE_GEMINI_SDK else None
 
@@ -506,6 +549,9 @@ def generate_answer(
             citation_complete=True,
             has_missing_citations=False,
             insufficient_evidence=True,
+            conflicts_detected=has_conflicts,
+            conflicts=detected_conflicts,
+            conflict_status="CONFLICT_DETECTED" if has_conflicts else "NO_CONFLICT",
             unsupported_citations=[],
             evidence_clause_ids=sorted(list(allowed_ids)),
             raw_response=None,
@@ -534,6 +580,9 @@ def generate_answer(
         citation_complete=is_citation_complete,
         has_missing_citations=not is_citation_complete,
         insufficient_evidence=is_insufficient,
+        conflicts_detected=has_conflicts,
+        conflicts=detected_conflicts,
+        conflict_status="CONFLICT_DETECTED" if has_conflicts else "NO_CONFLICT",
         unsupported_citations=unsupported_citations,
         evidence_clause_ids=sorted(list(allowed_ids)),
         raw_response=raw_response,
@@ -550,18 +599,15 @@ if __name__ == "__main__":
             pass
 
     print("=" * 70)
-    print("Grounded Answer Generation Demonstration (with Robust Citations)")
+    print("Grounded Answer Generation Demonstration (with Conflict Handling)")
     print("=" * 70)
 
     retriever = PolicyRetriever()
 
     demo_scenarios = [
-        ("What is the earnings disregard?", None),
-        ("What is the deadline for reporting a change?", None),
+        ("What is the earnings disregard for a determination on 15 March 2026?", None),
+        ("What is the deadline for reporting a change of circumstances?", None),
         ("What is the capital of France?", None),
-        ("What is the weather today?", None),
-        ("How do I appeal my property tax?", [retriever.clauses[0]]),  # Unrelated evidence (§1.4.1)
-        ("What is the deadline for reporting a change occurring on 15 April 2026?", [c for c in retriever.clauses if c.clause_id == "4.3.2" and not c.is_amendment]),  # Missing amendment evidence
     ]
 
     for demo_question, forced_evidence in demo_scenarios:
@@ -585,33 +631,19 @@ if __name__ == "__main__":
                     q_part = p.split("USER QUESTION:")[-1].split("POLICY EVIDENCE:")[0]
                 q_low = q_part.lower()
 
-                # Check if evidence contains relevant clauses
                 evidence_text = p.split("POLICY EVIDENCE:")[-1].lower() if "POLICY EVIDENCE:" in p else p.lower()
                 if "france" in q_low or "weather" in q_low or "property tax" in q_low:
                     return "The provided policy evidence is insufficient to answer this question."
-                elif "15 april 2026" in q_low and "amendment 2026-01" not in evidence_text:
-                    return "The provided policy evidence is insufficient to determine post-amendment reporting rules."
-                elif "20 february 2026" in q_low and "20 march 2026" in q_low:
+                elif "15 march 2026" in q_low:
                     return (
-                        "Under Amendment No. 2026-01 §5.2, because the change of circumstances occurred on 20 February 2026 "
-                        "(before 1 March 2026), the pre-amendment reporting deadline applies regardless of the determination date. "
-                        "Under §4.3.2, the recipient must report the change within **10 calendar days**."
+                        "For a determination made on 15 March 2026, the amended earnings disregard applies under "
+                        "Amendment No. 2026-01 §1.1 and §5.1. Under §6.4.1(a), the first **$175 per month** of earnings is disregarded."
                     )
-                elif "10 february 2026" in q_low:
+                elif "change of circumstances" in q_low:
                     return (
-                        "For a change of circumstances occurring on 10 February 2026, the pre-amendment deadline applies under "
-                        "Amendment No. 2026-01 §5.2. Under §4.3.2, the recipient must report the change within **10 calendar days**."
-                    )
-                elif "15 april 2026" in q_low:
-                    return (
-                        "For a change of circumstances occurring on 15 April 2026, the amended deadline applies under "
-                        "Amendment No. 2026-01 §2.1 and §5.2. Under §4.3.2 as amended, the recipient must report within **14 calendar days**."
-                    )
-                elif "disregard" in q_low or "earnings" in q_low:
-                    return (
-                        "Under the original policy manual (§6.4.1), the first **$120 per month** of earnings is disregarded. "
-                        "Effective 1 March 2026 under Amendment No. 2026-01 §1.1, the disregard is increased to **$175 per month**. "
-                        "Under Amendment No. 2026-01 §5.1, the $175 disregard applies to any determination made on or after 1 March 2026."
+                        "The retrieved policy evidence contains two related references with different timeframes: "
+                        "under §4.3.2, the recipient's direct obligation is to report within **10 calendar days** (or 14 calendar days on/after 1 March 2026 under Amendment No. 2026-01 §2.1 and §5.2), "
+                        "whereas §9.1.4 references a **30 calendar day** period regarding overpayment establishment notifications."
                     )
                 else:
                     return (
@@ -629,6 +661,9 @@ if __name__ == "__main__":
         print(f"Validated Citations: {result.citations}")
         print(f"Validated Citation Objects: {[str(vc) for vc in result.validated_citations]}")
         print(f"Unsupported Citations: {result.unsupported_citations}")
+        print(f"Conflict Detected: {result.conflicts_detected}")
+        if result.conflicts_detected:
+            print(f"Detected Conflicts: {[c.description for c in result.conflicts]}")
         print(f"Citation Completeness: {result.citation_complete}")
         print(f"Grounded Status: {result.grounded}")
         print(f"Insufficient Evidence: {result.insufficient_evidence}")
