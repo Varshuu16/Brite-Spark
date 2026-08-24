@@ -73,13 +73,10 @@ class TestWebApplication(unittest.TestCase):
 
     def test_conversation_history_retention_in_active_session(self):
         """Verify multi-turn questioning preserves previous question and answer during active session."""
-        # First turn
         self.client.post("/", data={"question": "What is the earnings disregard?"})
-        # Second turn
         response = self.client.post("/", data={"question": "A change occurred on 15 April 2026. What is the reporting deadline?"})
         self.assertEqual(response.status_code, 200)
         content = response.data.decode("utf-8")
-        # Both turns should appear in the active session
         self.assertIn("What is the earnings disregard?", content)
         self.assertIn("A change occurred on 15 April 2026. What is the reporting deadline?", content)
         self.assertIn("14 calendar days", content)
@@ -95,20 +92,17 @@ class TestWebApplication(unittest.TestCase):
 
     def test_server_restart_generation_id_clears_old_session(self):
         """Verify that when server restarts (new SERVER_GENERATION_ID), old session history is invalidated."""
-        # Ask a question during generation 1
+    
         self.client.post("/", data={"question": "What is the earnings disregard?"})
 
-        # Simulate server restart by generating a new SERVER_GENERATION_ID
         original_gen = app_module.SERVER_GENERATION_ID
         try:
             app_module.SERVER_GENERATION_ID = str(uuid.uuid4())
 
-            # Next request with the existing client/cookie
             response = self.client.get("/")
             self.assertEqual(response.status_code, 200)
             content = response.data.decode("utf-8")
 
-            # Must render the clean initial home state without previous user bubble
             self.assertIn("Ask anything about the policy manual", content)
             self.assertNotIn("class=\"user-bubble\"", content)
         finally:

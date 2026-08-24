@@ -12,20 +12,19 @@ from typing import Dict, List, Optional, Tuple
 
 
 class TemporalStatus(Enum):
-    PRE_AMENDMENT = "PRE_AMENDMENT"     # Strictly before 1 March 2026
-    POST_AMENDMENT = "POST_AMENDMENT"   # On or after 1 March 2026
-    SPANNING = "SPANNING"               # Period spanning across 1 March 2026
-    UNSPECIFIED = "UNSPECIFIED"         # No temporal date or period mentioned
+    PRE_AMENDMENT = "PRE_AMENDMENT"     
+    POST_AMENDMENT = "POST_AMENDMENT"   
+    SPANNING = "SPANNING"               
+    UNSPECIFIED = "UNSPECIFIED"         
 
 
 class QueryEventType(Enum):
-    DETERMINATION = "DETERMINATION"               # Governed by Amendment §5.1
-    CHANGE_OF_CIRCUMSTANCES = "CHANGE_OF_CIRCUMSTANCES"  # Governed by Amendment §5.2
-    SPANNING_PERIOD = "SPANNING_PERIOD"           # Governed by Amendment §5.3
-    GENERAL = "GENERAL"                           # General inquiry
+    DETERMINATION = "DETERMINATION"               
+    CHANGE_OF_CIRCUMSTANCES = "CHANGE_OF_CIRCUMSTANCES"  
+    SPANNING_PERIOD = "SPANNING_PERIOD"           
+    GENERAL = "GENERAL"                           
 
 
-# Boundary effective date of Amendment No. 2026-01
 AMENDMENT_EFFECTIVE_DATE = datetime.date(2026, 3, 1)
 
 MONTHS_MAP = {
@@ -63,7 +62,7 @@ class TemporalContext:
     claim_period_date: Optional[datetime.date] = None
     span_start: Optional[datetime.date] = None
     span_end: Optional[datetime.date] = None
-    applicable_transitional_rule: Optional[str] = None  # "5.1", "5.2", "5.3"
+    applicable_transitional_rule: Optional[str] = None  
     explanation: str = ""
 
 
@@ -80,7 +79,6 @@ def parse_date_string(date_text: str) -> Optional[datetime.date]:
     if iso_match:
         return datetime.date(int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3)))
 
-    # Format: Day Month Year (e.g. 10 February 2026 or 10 Feb 2026)
     dmy_match = re.match(r"^(\d{1,2})\s+([a-z]+)\s+(\d{4})$", clean)
     if dmy_match:
         day = int(dmy_match.group(1))
@@ -89,7 +87,6 @@ def parse_date_string(date_text: str) -> Optional[datetime.date]:
         if month_name in MONTHS_MAP:
             return datetime.date(year, MONTHS_MAP[month_name], day)
 
-    # Format: Month Day Year (e.g. February 10, 2026)
     mdy_match = re.match(r"^([a-z]+)\s+(\d{1,2}),?\s+(\d{4})$", clean)
     if mdy_match:
         month_name = mdy_match.group(1)
@@ -98,7 +95,6 @@ def parse_date_string(date_text: str) -> Optional[datetime.date]:
         if month_name in MONTHS_MAP:
             return datetime.date(year, MONTHS_MAP[month_name], day)
 
-    # Format: Month Year (e.g. February 2026 -> default to 1st of that month)
     my_match = re.match(r"^([a-z]+)\s+(\d{4})$", clean)
     if my_match:
         month_name = my_match.group(1)
@@ -117,8 +113,6 @@ def extract_semantic_dates(query: str) -> Dict[str, Tuple[str, datetime.date]]:
     lower = query.lower()
     semantic_dates: Dict[str, Tuple[str, datetime.date]] = {}
 
-    # 1. Change of circumstances date patterns
-    # e.g., "change occurred on 20 February 2026", "moved on 20 February 2026", "change that occurred on 10 Feb 2026"
     change_patterns = [
         rf"(?:change\s+(?:of\s+circumstances\s+)?(?:that\s+)?(?:occurred|happened|arose)|moved|change\s+was|change)\s+(?:on|in|at)?\s*({DATE_REGEX})",
         rf"({DATE_REGEX})\s+(?:change|move)",
@@ -132,8 +126,6 @@ def extract_semantic_dates(query: str) -> Dict[str, Tuple[str, datetime.date]]:
                 semantic_dates["change"] = (d_str, parsed)
                 break
 
-    # 2. Determination date patterns
-    # e.g., "determination was made on 20 March 2026", "decision was made on 15 March 2026", "determined on 20 March 2026"
     det_patterns = [
         rf"(?:determination|decision|determined|decided)\s+(?:was\s+)?(?:made\s+)?(?:on|in|at)?\s*({DATE_REGEX})",
         rf"({DATE_REGEX})\s+(?:determination|decision)",
@@ -147,8 +139,6 @@ def extract_semantic_dates(query: str) -> Dict[str, Tuple[str, datetime.date]]:
                 semantic_dates["determination"] = (d_str, parsed)
                 break
 
-    # 3. Claim period date patterns
-    # e.g., "claim period was January 2026", "claim was for January 2026", "claim in January 2026"
     claim_patterns = [
         rf"(?:claim\s+period|claim\s+was\s+for|claim\s+in|for\s+a)\s+({DATE_REGEX})\s+(?:claim|period)?",
     ]
@@ -170,7 +160,6 @@ def extract_temporal_context(query: str) -> TemporalContext:
     """
     lower_query = query.lower()
 
-    # Detect Query Subject / Event Type
     is_reporting_query = any(k in lower_query for k in [
         "deadline", "report", "reporting", "change of circumstance", "safe harbor", "10 days", "14 days"
     ])
@@ -183,7 +172,6 @@ def extract_temporal_context(query: str) -> TemporalContext:
     elif is_determination_query and not is_reporting_query:
         event_type = QueryEventType.DETERMINATION
     elif is_reporting_query and is_determination_query:
-        # Check primary question focus (e.g. "what reporting deadline applies" -> reporting)
         if any(k in lower_query for k in ["deadline", "reporting", "report"]):
             event_type = QueryEventType.CHANGE_OF_CIRCUMSTANCES
         else:
@@ -191,7 +179,6 @@ def extract_temporal_context(query: str) -> TemporalContext:
     else:
         event_type = QueryEventType.GENERAL
 
-    # Check for spanning periods (e.g., "from 15 February 2026 to 15 March 2026")
     all_dates_in_query: List[Tuple[str, datetime.date]] = []
     for dm in re.findall(DATE_REGEX, lower_query):
         parsed = parse_date_string(dm)
@@ -214,7 +201,6 @@ def extract_temporal_context(query: str) -> TemporalContext:
                 explanation="The claim period spans across 1 March 2026; daily apportionment applies under Amendment §5.3 and §7.4.3."
             )
 
-    # Extract semantic dates
     semantic_dates = extract_semantic_dates(query)
     change_info = semantic_dates.get("change")
     det_info = semantic_dates.get("determination")
@@ -229,9 +215,7 @@ def extract_temporal_context(query: str) -> TemporalContext:
     rule: Optional[str] = None
     explanation: str = ""
 
-    # Apply Legal Priority Rules (§5.1 vs §5.2)
     if event_type == QueryEventType.CHANGE_OF_CIRCUMSTANCES:
-        # Under Amendment §5.2, the CHANGE DATE controls reporting deadlines regardless of determination date
         rule = "5.2"
         if change_date:
             controlling_date = change_date
@@ -262,7 +246,6 @@ def extract_temporal_context(query: str) -> TemporalContext:
                 explanation=explanation,
             )
         elif det_date:
-            # Fallback if only determination date mentioned
             controlling_date = det_date
             controlling_str = det_info[0]
             status = TemporalStatus.PRE_AMENDMENT if controlling_date < AMENDMENT_EFFECTIVE_DATE else TemporalStatus.POST_AMENDMENT
@@ -278,7 +261,6 @@ def extract_temporal_context(query: str) -> TemporalContext:
             )
 
     elif event_type == QueryEventType.DETERMINATION or is_determination_query:
-        # Under Amendment §5.1, the DETERMINATION DATE controls disregard, thresholds, and sanctions
         rule = "5.1"
         if det_date:
             controlling_date = det_date
@@ -309,7 +291,6 @@ def extract_temporal_context(query: str) -> TemporalContext:
                 explanation=explanation,
             )
         elif claim_date:
-            # Only claim period mentioned without determination date
             controlling_date = claim_date
             controlling_str = claim_info[0]
             status = TemporalStatus.PRE_AMENDMENT if controlling_date < AMENDMENT_EFFECTIVE_DATE else TemporalStatus.POST_AMENDMENT
@@ -324,7 +305,6 @@ def extract_temporal_context(query: str) -> TemporalContext:
                 explanation=f"Claim period {controlling_str} identified under §5.1.",
             )
 
-    # General / Generic date match
     if all_dates_in_query:
         first_str, first_date = all_dates_in_query[0]
         status = TemporalStatus.PRE_AMENDMENT if first_date < AMENDMENT_EFFECTIVE_DATE else TemporalStatus.POST_AMENDMENT
@@ -339,7 +319,6 @@ def extract_temporal_context(query: str) -> TemporalContext:
             explanation=f"Date {first_str} identified; governed by Amendment §{rule}.",
         )
 
-    # Unspecified Date
     return TemporalContext(
         status=TemporalStatus.UNSPECIFIED,
         event_type=event_type,

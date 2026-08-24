@@ -21,7 +21,6 @@ except ImportError:
     from temporal import TemporalContext, TemporalStatus, extract_temporal_context
 
 
-# Standard English stopwords to filter out non-informative noise words
 STOP_WORDS: Set[str] = {
     "a", "about", "above", "after", "again", "against", "all", "am", "an", "and",
     "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being",
@@ -46,7 +45,6 @@ STOP_WORDS: Set[str] = {
 }
 
 
-# Generic procedural and legal concept expansions for policy retrieval
 CONCEPT_SYNONYMS: Dict[str, List[str]] = {
     "deadlin": ["time", "limit", "period", "day", "within", "date", "deadlin"],
     "timefram": ["time", "limit", "period", "day", "within", "date"],
@@ -105,7 +103,6 @@ class PorterStemmer:
         if len(w) <= 2:
             return w
 
-        # Common policy root normalization aliases
         if w in {"apply", "applies", "applicant", "applicants", "application", "applications", "applicable"}:
             return "applic"
         if w in {"eligible", "eligibility", "ineligible", "ineligibility"}:
@@ -113,7 +110,6 @@ class PorterStemmer:
         if w in {"reside", "residence", "resident", "residential", "residing"}:
             return "resid"
 
-        # Step 1a
         if w.endswith("sses"):
             w = w[:-2]
         elif w.endswith("ies"):
@@ -123,7 +119,6 @@ class PorterStemmer:
         elif w.endswith("s"):
             w = w[:-1]
 
-        # Step 1b
         flag = False
         if w.endswith("eed"):
             stem = w[:-3]
@@ -146,11 +141,9 @@ class PorterStemmer:
             elif self.get_measure(w) == 1 and self.cvc(w):
                 w = w + "e"
 
-        # Step 1c
         if w.endswith("y") and self.contains_vowel(w[:-1]):
             w = w[:-1] + "i"
 
-        # Step 2
         step2_pairs = [
             ("ational", "ate"), ("tional", "tion"), ("enci", "ence"), ("anci", "ance"),
             ("izer", "ize"), ("abli", "able"), ("alli", "al"), ("entli", "ent"),
@@ -165,7 +158,6 @@ class PorterStemmer:
                     w = stem + repl
                 break
 
-        # Step 3
         step3_pairs = [
             ("icate", "ic"), ("ative", ""), ("alize", "al"), ("iciti", "ic"),
             ("ical", "ic"), ("ful", ""), ("ness", ""),
@@ -177,7 +169,6 @@ class PorterStemmer:
                     w = stem + repl
                 break
 
-        # Step 4
         step4_suffixes = [
             "al", "ance", "ence", "er", "ic", "able", "ible", "ant", "ement",
             "ment", "ent", "ou", "ism", "ate", "iti", "ous", "ive", "ize",
@@ -193,14 +184,12 @@ class PorterStemmer:
             if self.get_measure(stem) > 1 and (stem.endswith("s") or stem.endswith("t")):
                 w = stem
 
-        # Step 5a
         if w.endswith("e"):
             stem = w[:-1]
             m = self.get_measure(stem)
             if m > 1 or (m == 1 and not self.cvc(stem)):
                 w = stem
 
-        # Step 5b
         if self.get_measure(w) > 1 and self.ends_with_double_consonant(w) and w.endswith("l"):
             w = w[:-1]
 
@@ -324,7 +313,6 @@ class PolicyRetriever:
         self.b = b
         self.min_score = min_score
 
-        # Field weighting configuration
         self.weights = {
             "title": 4.0,
             "section": 3.0,
@@ -344,7 +332,6 @@ class PolicyRetriever:
         self.section_to_clause_indices: Dict[str, List[int]] = defaultdict(list)
         self.cross_refs: Dict[int, List[str]] = {}
 
-        # Raw texts for exact phrase and proximity matching
         self.raw_texts: List[str] = []
 
         total_length = 0.0
@@ -355,17 +342,14 @@ class PolicyRetriever:
             if sec_num:
                 self.section_to_clause_indices[sec_num].append(idx)
 
-            # Extract internal cross-references (§X.Y.Z or §X.Y)
             refs = re.findall(r"§(\d+\.\d+(?:\.\d+)?)", clause.clause_text)
             self.cross_refs[idx] = refs
 
-            # Tokenize individual fields
             title_tokens = tokenize(clause.clause_title or "", stem=True, remove_stopwords=True)
             section_tokens = tokenize(clause.parent_section or "", stem=True, remove_stopwords=True)
             part_tokens = tokenize(clause.parent_part or "", stem=True, remove_stopwords=True)
             text_tokens = tokenize(clause.clause_text, stem=True, remove_stopwords=True)
 
-            # Combined weighted token sequence for term frequencies
             combined_tokens = []
             combined_tokens.extend(title_tokens * int(self.weights["title"]))
             combined_tokens.extend(section_tokens * int(self.weights["section"]))
@@ -377,18 +361,15 @@ class PolicyRetriever:
             self.doc_lengths.append(doc_len)
             total_length += doc_len
 
-            # Track unique terms for Document Frequency (DF)
             unique_terms = set(combined_tokens)
             for term in unique_terms:
                 self.df[term] = self.df.get(term, 0) + 1
 
-            # Store full lowercased text for exact substring / phrase matching
             full_text = f"{clause.parent_part or ''} {clause.parent_section or ''} {clause.clause_title or ''} {clause.clause_text}".lower()
             self.raw_texts.append(full_text)
 
         self.avg_doc_len = total_length / self.doc_count if self.doc_count > 0 else 1.0
 
-        # Calculate BM25 IDF for all indexed terms
         self.idf: Dict[str, float] = {}
         for term, freq in self.df.items():
             val = (self.doc_count - freq + 0.5) / (freq + 0.5)
@@ -404,34 +385,28 @@ class PolicyRetriever:
         words = re.findall(r"\b[a-zA-Z0-9_\$]+\b", query_raw.lower())
         non_stop_words = [w for w in words if w not in STOP_WORDS]
 
-        # Bigram exact matches
         if len(non_stop_words) >= 2:
             for i in range(len(non_stop_words) - 1):
                 bigram = f"{non_stop_words[i]} {non_stop_words[i+1]}"
                 if bigram in raw_doc:
                     bonus += 3.0
 
-        # Trigram exact matches
         if len(non_stop_words) >= 3:
             for i in range(len(non_stop_words) - 2):
                 trigram = f"{non_stop_words[i]} {non_stop_words[i+1]} {non_stop_words[i+2]}"
                 if trigram in raw_doc:
                     bonus += 4.5
 
-        # Full phrase match
         full_phrase = " ".join(non_stop_words)
         if len(non_stop_words) >= 2 and full_phrase in raw_doc:
             bonus += 5.0
 
-        # Term proximity bonus (e.g. 'change' and 'circumstances' within 10 words)
         doc_words = re.findall(r"\b[a-zA-Z0-9_\$]+\b", raw_doc)
         if len(non_stop_words) >= 2 and len(doc_words) >= 2:
             stems = [STEMMER.stem(w) for w in non_stop_words]
             doc_stems = [STEMMER.stem(w) for w in doc_words]
-            # Check if main query concepts appear within a small window
             found_pos = [i for i, s in enumerate(doc_stems) if s in stems]
             if len(found_pos) >= 2:
-                # Find min distance between different query stems
                 for a in range(len(found_pos) - 1):
                     dist = found_pos[a+1] - found_pos[a]
                     if 1 < dist <= 8 and doc_stems[found_pos[a]] != doc_stems[found_pos[a+1]]:
@@ -465,19 +440,15 @@ class PolicyRetriever:
         if not base_tokens:
             return []
 
-        # Extract or use supplied temporal context
         t_ctx = temporal_context or extract_temporal_context(query)
 
-        # Expand query with generic procedural/legal concept synonyms
         expanded_qtf: Dict[str, float] = {}
         for token in base_tokens:
             expanded_qtf[token] = expanded_qtf.get(token, 0.0) + 1.0
             if token in CONCEPT_SYNONYMS:
                 for syn in CONCEPT_SYNONYMS[token]:
-                    # Synonym receives fractional weight (0.6x)
                     expanded_qtf[syn] = expanded_qtf.get(syn, 0.0) + 0.6
 
-        # Step 1: Initial BM25 Scoring
         raw_scores: Dict[int, float] = {}
 
         for idx, clause in enumerate(self.clauses):
@@ -504,34 +475,28 @@ class PolicyRetriever:
             phrase_bonus = self._compute_phrase_and_proximity_bonus(query, idx)
             total_score = bm25_score + phrase_bonus
 
-            # Direct citation match bonus (e.g. §4.3.2 in query)
             if clause.clause_id in query or clause.citation in query:
                 total_score += 20.0
 
             if total_score > 0.0:
                 raw_scores[idx] = total_score
 
-        # Step 2: Cross-Reference Citation Graph Propagation
         final_scores: Dict[int, float] = dict(raw_scores)
         for idx, score in raw_scores.items():
             if score < 3.0:
                 continue
             refs = self.cross_refs.get(idx, [])
             for ref in refs:
-                # Direct clause reference
                 if ref in self.clause_index:
                     for target_idx in self.clause_index[ref]:
                         transfer = score * 0.30
                         final_scores[target_idx] = final_scores.get(target_idx, 0.0) + transfer
-                # Section reference
                 elif ref in self.section_to_clause_indices:
                     sec_indices = self.section_to_clause_indices[ref]
                     transfer = (score * 0.25) / max(len(sec_indices), 1)
                     for target_idx in sec_indices:
                         final_scores[target_idx] = final_scores.get(target_idx, 0.0) + transfer
 
-        # Step 3: Temporal Priority Adjustment
-        # Boost appropriate clause version based on temporal context
         for idx, clause in enumerate(self.clauses):
             if idx not in final_scores:
                 continue
@@ -539,7 +504,6 @@ class PolicyRetriever:
             current_score = final_scores[idx]
 
             if t_ctx.status == TemporalStatus.PRE_AMENDMENT:
-                # Historical query: prioritize original manual clauses
                 if not clause.is_amendment:
                     final_scores[idx] = current_score * 1.35
                 elif clause.is_transitional:
@@ -551,7 +515,6 @@ class PolicyRetriever:
                     final_scores[idx] += 25.0
 
             elif t_ctx.status == TemporalStatus.POST_AMENDMENT:
-                # Current/amended query: prioritize amended version & inserted clauses
                 if clause.is_amendment and not clause.is_transitional:
                     final_scores[idx] = current_score * 1.45
                 elif clause.is_transitional:
@@ -561,20 +524,16 @@ class PolicyRetriever:
                     final_scores[idx] += 25.0
 
             elif t_ctx.status == TemporalStatus.SPANNING:
-                # Spanning query: elevate transitional spanning provision §5.3 and §7.4.3
                 if clause.clause_id == "Amendment 2026-01 §5.3" or clause.clause_id == "7.4.3":
                     final_scores[idx] = current_score + 25.0
             elif t_ctx.status == TemporalStatus.UNSPECIFIED:
-                # When date unspecified, ensure both versions score well and transitional rules are present
                 if clause.is_transitional:
                     final_scores[idx] = current_score * 1.10
 
-        # Filter by threshold
         qualified: List[Tuple[int, float]] = [
             (idx, score) for idx, score in final_scores.items() if score >= threshold
         ]
 
-        # Sort strictly deterministic: descending by score, tie-break by clause_id
         qualified.sort(key=lambda item: (-item[1], self.clauses[item[0]].clause_id))
 
         results = [

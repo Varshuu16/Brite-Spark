@@ -23,7 +23,6 @@ class TestPolicyRetriever(unittest.TestCase):
         results = self.retriever.retrieve("What is the deadline for reporting a change?", top_k=5)
         self.assertGreater(len(results), 0)
         retrieved_ids = [r.clause_id for r in results]
-        # Should retrieve §4.3.2 (recipient reporting obligations) or §9.1.4 / §9.1.2
         self.assertTrue(
             "4.3.2" in retrieved_ids or "9.1.4" in retrieved_ids or "9.1.2" in retrieved_ids,
             f"Expected reporting clauses in retrieved IDs: {retrieved_ids}"
@@ -33,12 +32,10 @@ class TestPolicyRetriever(unittest.TestCase):
 
     def test_different_wording(self):
         """Test B: Different wording query retrieving correct conceptual clauses."""
-        # Query uses synonyms/phrasings like "job earnings exemption" instead of exact "disregard of employment earnings"
         query = "How much job earnings can a household exempt from countable income?"
         results = self.retriever.retrieve(query, top_k=5)
         self.assertGreater(len(results), 0)
         retrieved_ids = [r.clause_id for r in results]
-        # Should retrieve §6.4.1 (Disregards, $120 earnings disregard) or §6.1.1
         self.assertTrue(
             "6.4.1" in retrieved_ids or "6.1.1" in retrieved_ids or "6.4.2" in retrieved_ids,
             f"Expected disregards clauses in retrieved IDs: {retrieved_ids}"
@@ -50,7 +47,6 @@ class TestPolicyRetriever(unittest.TestCase):
         results = self.retriever.retrieve(query, top_k=5)
         self.assertGreaterEqual(len(results), 2)
         retrieved_ids = [r.clause_id for r in results]
-        # Should capture both §2.3.1 (conditions for applicants under 18) and §2.3.2 (supervisor referral)
         self.assertIn("2.3.1", retrieved_ids)
         self.assertIn("2.3.2", retrieved_ids)
 
@@ -71,9 +67,7 @@ class TestPolicyRetriever(unittest.TestCase):
     def test_minimum_relevance_threshold(self):
         """Test F: Minimum relevance threshold filters weak matches."""
         query = "district office locations"
-        # Low threshold returns matches
         lenient_results = self.retriever.retrieve(query, top_k=10, min_score=0.1)
-        # High threshold only returns high-confidence matches
         strict_results = self.retriever.retrieve(query, top_k=10, min_score=8.0)
 
         self.assertGreater(len(lenient_results), len(strict_results))
@@ -123,7 +117,6 @@ class TestPolicyRetriever(unittest.TestCase):
 
         self.assertIn("4.3.2", retrieved_ids, "Primary obligation §4.3.2 must be retrieved")
         self.assertIn("9.1.4", retrieved_ids, "Overpayment reference §9.1.4 must be retrieved")
-        # Ensure §4.3.2 is ranked in top 2
         self.assertIn("4.3.2", retrieved_ids[:2])
 
     def test_cross_reference_generalization_sanctions(self):

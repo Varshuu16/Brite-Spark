@@ -48,7 +48,6 @@
             flex-direction: column;
         }
 
-        /* Top Bar (for Conversation View) */
         .app-header {
             border-bottom: 1px solid var(--border-color);
             background: #ffffff;
@@ -93,7 +92,6 @@
             border-color: #cbd5e1;
         }
 
-        /* Main Container */
         .main-content {
             max-width: 880px;
             width: 100%;
@@ -104,7 +102,6 @@
             flex-direction: column;
         }
 
-        /* Initial Centered Home State */
         .home-hero-container {
             flex: 1;
             display: flex;
@@ -192,7 +189,6 @@
             transform: scale(0.98);
         }
 
-        /* Example Chips */
         .examples-wrapper {
             display: flex;
             align-items: center;
@@ -220,7 +216,6 @@
             border-color: #cbd5e1;
         }
 
-        /* Error Notice */
         .error-alert {
             background-color: var(--danger-bg);
             border: 1px solid var(--danger-border);
@@ -231,7 +226,6 @@
             margin-bottom: 1.5rem;
         }
 
-        /* Conversation Thread View */
         .conversation-container {
             padding: 2rem 0 3rem;
             flex: 1;
@@ -241,7 +235,6 @@
             margin-bottom: 2.25rem;
         }
 
-        /* User Message */
         .user-turn {
             margin-bottom: 1.25rem;
             display: flex;
@@ -269,7 +262,6 @@
             max-width: 85%;
         }
 
-        /* Assistant Turn */
         .assistant-turn {
             display: flex;
             flex-direction: column;
@@ -340,7 +332,6 @@
             white-space: pre-line;
         }
 
-        /* Warning & Refusal Notice Panels */
         .notice-panel {
             border-radius: var(--radius-md);
             padding: 0.85rem 1.15rem;
@@ -359,7 +350,6 @@
             margin-bottom: 0.25rem;
         }
 
-        /* Metadata Strip */
         .meta-strip {
             background: var(--bg-subtle);
             border: 1px solid var(--border-color);
@@ -391,7 +381,6 @@
             color: var(--text-main);
         }
 
-        /* Citations Panel */
         .citations-panel {
             background: #ffffff;
             border: 1px solid var(--border-color);
@@ -460,13 +449,11 @@
             font-style: italic;
         }
 
-        /* Bottom Fixed/Sticky Query Bar */
         .bottom-query-bar {
             padding: 1.5rem 0 2.5rem;
             border-top: 1px solid var(--border-subtle);
         }
 
-        /* Footer */
         footer {
             border-top: 1px solid var(--border-subtle);
             padding: 1.5rem 0;
@@ -497,7 +484,6 @@
     </style>
 </head>
 <body>
-    <!-- Top Header (Shown during conversation view) -->
     {% if history and history|length > 0 %}
     <header class="app-header">
         <div class="header-inner">
@@ -508,7 +494,6 @@
     {% endif %}
 
     <div class="main-content">
-        <!-- Error Alert if present -->
         {% if error_message %}
         <div class="error-alert" style="margin-top: 1.5rem;">
             <strong>Notice:</strong> {{ error_message }}
@@ -516,12 +501,10 @@
         {% endif %}
 
         {% if not history or history|length == 0 %}
-        <!-- Initial Home State (Centered) -->
         <div class="home-hero-container">
             <h1 class="home-title">BriteSpark Policy Assistant</h1>
             <p class="home-subtitle">Ask anything about the policy manual</p>
 
-            <!-- Centered Search Form -->
             <div class="search-container">
                 <form method="POST" action="/" id="homePolicyForm" class="search-form">
                     <input type="hidden" name="chat_id" class="chat-id-input" value="{{ chat_id or '' }}" />
@@ -541,7 +524,6 @@
                 </form>
             </div>
 
-            <!-- Example Question Pills -->
             <div class="examples-wrapper">
                 <a href="javascript:void(0)" class="example-pill" onclick="sendQuery('What is the deadline for reporting a change of circumstances?')">Reporting deadline</a>
                 <a href="javascript:void(0)" class="example-pill" onclick="sendQuery('What is the earnings disregard?')">Earnings disregard</a>
@@ -552,17 +534,14 @@
             </div>
         </div>
         {% else %}
-        <!-- Conversation Thread State -->
         <div class="conversation-container">
             {% for turn in history %}
             <div class="turn-block">
-                <!-- User Question -->
                 <div class="user-turn">
                     <span class="user-label">USER</span>
                     <div class="user-bubble">{{ turn.question }}</div>
                 </div>
 
-                <!-- Assistant Response -->
                 <div class="assistant-turn">
                     <div class="assistant-header">
                         <span class="assistant-label">BRITESPARK</span>
@@ -575,7 +554,6 @@
                         </div>
                     </div>
 
-                    <!-- Conflict Notice Banner if applicable -->
                     {% if turn.conflicts_detected %}
                     <div class="notice-panel notice-warning">
                         <div class="notice-title">Potential Policy Conflict Detected</div>
@@ -589,7 +567,6 @@
                     </div>
                     {% endif %}
 
-                    <!-- Insufficient Evidence Notice if applicable -->
                     {% if turn.insufficient_evidence %}
                     <div class="notice-panel notice-warning">
                         <div class="notice-title">Insufficient Policy Evidence</div>
@@ -597,7 +574,6 @@
                     </div>
                     {% endif %}
 
-                    <!-- Answer Card -->
                     <div class="answer-content-card">
                         <div class="answer-heading-row">
                             <span class="answer-title-text">Answer</span>
@@ -605,7 +581,6 @@
                         <div class="answer-body-text">{{ turn.answer }}</div>
                     </div>
 
-                    <!-- Metadata Strip -->
                     <div class="meta-strip">
                         <div class="meta-col">
                             <span class="meta-lbl">Grounding Status</span>
@@ -625,7 +600,6 @@
                         </div>
                     </div>
 
-                    <!-- Validated Sources & Citations -->
                     {% if turn.validated_citations %}
                     <div class="citations-panel">
                         <div class="citations-header">Sources &amp; Validated Citations</div>
@@ -649,7 +623,6 @@
             </div>
             {% endfor %}
 
-            <!-- Bottom Query Bar for Continuing Conversation -->
             <div class="bottom-query-bar">
                 <form method="POST" action="/" id="conversationForm" class="search-form">
                     <input type="hidden" name="chat_id" class="chat-id-input" value="{{ chat_id or '' }}" />
@@ -692,7 +665,6 @@
             return cid;
         }
 
-        // Attach chat_id to hidden inputs and auto-scroll to latest message
         document.addEventListener("DOMContentLoaded", function() {
             const cid = sessionStorage.getItem('britespark_active_chat_id');
             const inputs = document.querySelectorAll('.chat-id-input');
@@ -702,7 +674,6 @@
                 }
             });
 
-            // If conversation turns exist, scroll the newest turn into view
             const turns = document.querySelectorAll('.turn-block');
             if (turns.length > 0) {
                 const latestTurn = turns[turns.length - 1];

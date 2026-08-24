@@ -54,11 +54,6 @@ def detect_conflicts(
         cid = c.clause_id.lstrip("§").strip()
         clause_by_id.setdefault(cid, []).append(c)
 
-    # -------------------------------------------------------------------------
-    # Check 1: Reporting Deadline Substantive Discrepancy (§4.3.2 vs §9.1.4)
-    # -------------------------------------------------------------------------
-    # §4.3.2 requires reporting within 10 days (or 14 days post-amendment).
-    # In the original manual, §9.1.4 references a 30 calendar day period for overpayment recovery.
     has_432 = "4.3.2" in clause_by_id
     has_914 = "9.1.4" in clause_by_id
 
@@ -67,7 +62,6 @@ def detect_conflicts(
         c432 = clause_by_id["4.3.2"][0]
         c914 = clause_by_id["9.1.4"][0]
 
-        # Extract days mentioned in both clauses
         m432 = re.search(r"(\d+)\s+calendar\s+days", c432.clause_text, re.IGNORECASE)
         m914 = re.search(r"(\d+)\s+calendar\s+days", c914.clause_text, re.IGNORECASE)
 
@@ -100,9 +94,6 @@ def detect_conflicts(
                     )
                 )
 
-    # -------------------------------------------------------------------------
-    # Check 2: Sanction Contradiction (Sanction Imposition vs Sanction Prohibition)
-    # -------------------------------------------------------------------------
     has_sanction_clause = any("10.5" in cid for cid in clause_by_id)
     has_exception_10_5_3A = "10.5.3A" in clause_by_id
 
@@ -133,22 +124,14 @@ def detect_conflicts(
                     )
                 )
 
-    # -------------------------------------------------------------------------
-    # Check 3: Arbitrary Numeric Contradictions Across Retrieved Clauses
-    # -------------------------------------------------------------------------
-    # If two clauses with the SAME clause_id from DIFFERENT non-temporal sources
-    # or conflicting unresolvable amounts appear in evidence:
     for cid, cs in clause_by_id.items():
         if len(cs) > 1:
-            # Check if this is resolved by temporal context
             has_orig = any(not c.is_amendment for c in cs)
             has_amend = any(c.is_amendment for c in cs)
 
             if has_orig and has_amend:
-                # If temporal context is PRE_AMENDMENT or POST_AMENDMENT, this is resolved versioning, NOT conflict
                 if t_ctx and t_ctx.status in (TemporalStatus.PRE_AMENDMENT, TemporalStatus.POST_AMENDMENT):
                     continue
-                # If temporal context is UNSPECIFIED, this is chronological temporal applicability, NOT an unresolved conflict
                 if t_ctx and t_ctx.status == TemporalStatus.UNSPECIFIED:
                     continue
 

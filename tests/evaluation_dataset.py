@@ -43,7 +43,6 @@ class EvaluationCase:
         }
 
 
-# Complete suite of 21 deterministic evaluation cases
 EVALUATION_DATASET: List[EvaluationCase] = [
     EvaluationCase(
         case_id="E01",

@@ -117,7 +117,7 @@ class TestPolicyConflictHandling(unittest.TestCase):
 
     def test_part6_h_unsupported_conflict_citation_fails_grounding(self):
         """Test Part 6H: Answer citing unretrieved conflict clause §9.9.9 is marked ungrounded."""
-        evidence = [self.clause_4_3_2_orig]  # §9.9.9 is NOT in evidence
+        evidence = [self.clause_4_3_2_orig]  
         mock_response = (
             "There is a conflict between §4.3.2 (10 days) and §9.9.9 (30 days)."
         )
@@ -135,7 +135,6 @@ class TestPolicyConflictHandling(unittest.TestCase):
         """Test Part 6I: System cleanly distinguishes genuine conflict from no evidence / refusal."""
         evidence = [self.clause_4_3_2_orig, self.clause_9_1_4]
 
-        # Case 1: Genuine conflict with citations
         res_conflict = generate_answer(
             question="What is the reporting deadline?",
             retrieved_clauses=evidence,
@@ -145,7 +144,6 @@ class TestPolicyConflictHandling(unittest.TestCase):
         self.assertFalse(res_conflict.insufficient_evidence)
         self.assertTrue(res_conflict.grounded)
 
-        # Case 2: Zero evidence refusal
         res_refusal = generate_answer(
             question="What is the weather today?",
             retrieved_clauses=[],

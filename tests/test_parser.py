@@ -130,32 +130,25 @@ class TestPolicyParser(unittest.TestCase):
 
         amend_map = {c.clause_id: c for c in amendments}
 
-        # 1. Earnings disregard amended to $175
         self.assertIn("6.4.1", amend_map)
         self.assertIn("$175", amend_map["6.4.1"].clause_text)
         self.assertEqual(amend_map["6.4.1"].effective_date, "2026-03-01")
 
-        # 2. Reporting deadline amended to 14 calendar days
         self.assertIn("4.3.2", amend_map)
         self.assertIn("14 calendar days", amend_map["4.3.2"].clause_text)
 
-        # 3. Overpayment safe harbor amended to 14 calendar days
         self.assertIn("9.1.4", amend_map)
         self.assertIn("14 calendar days", amend_map["9.1.4"].clause_text)
 
-        # 4. Income thresholds table amended
         self.assertIn("6.6.1", amend_map)
         self.assertIn("$1,225", amend_map["6.6.1"].clause_text)
 
-        # 5. Sanctions rate amended to 15 per cent
         self.assertIn("10.5.2", amend_map)
         self.assertIn("15 per cent", amend_map["10.5.2"].clause_text)
 
-        # 6. Inserted §10.5.3A
         self.assertIn("10.5.3A", amend_map)
         self.assertIn("increased the award", amend_map["10.5.3A"].clause_text)
 
-        # 7. Transitional provisions §5.1, §5.2, §5.3
         self.assertIn("Amendment 2026-01 §5.1", amend_map)
         self.assertIn("Amendment 2026-01 §5.2", amend_map)
         self.assertIn("Amendment 2026-01 §5.3", amend_map)

@@ -68,8 +68,7 @@ class TestGroundedAnswer(unittest.TestCase):
 
     def test_unsupported_citation_rejected(self):
         """Test C: Citing a clause NOT supplied in the evidence is flagged as unsupported/ungrounded."""
-        evidence = [self.clause_6_4_1]  # Only 6.4.1 provided
-        # Model hallucinates a citation to §9.9.9 and §4.3.2 which were not in evidence
+        evidence = [self.clause_6_4_1]
         mock_response = "Under §6.4.1 earnings are disregarded, but §9.9.9 and §4.3.2 apply for appeals."
 
         result = generate_answer(
@@ -85,7 +84,7 @@ class TestGroundedAnswer(unittest.TestCase):
 
     def test_insufficient_evidence(self):
         """Test D: When evidence does not answer question, result indicates insufficient evidence."""
-        evidence = [self.clause_1_4_6]  # Evidence only about full-time students
+        evidence = [self.clause_1_4_6]  
         mock_response = "The provided policy evidence is insufficient to answer how to appeal a property tax assessment."
 
         result = generate_answer(
@@ -143,7 +142,6 @@ class TestGroundedAnswer(unittest.TestCase):
         """Test that default Gemini model is configured to gemini-3.6-flash and passed to model invocation."""
         self.assertEqual(DEFAULT_GEMINI_MODEL, "gemini-3.6-flash")
 
-        # Mock client to verify model parameter received
         class MockModels:
             def __init__(self):
                 self.received_model = None
@@ -457,9 +455,6 @@ class TestGroundedAnswer(unittest.TestCase):
         self.assertIn("10 calendar days", result.answer)
         self.assertIn("14 calendar days", result.answer)
 
-    # =========================================================================
-    # PART 4 ROBUST CITATION TESTS
-    # =========================================================================
 
     def test_part4_a_valid_original_citation(self):
         """Test Part 4A: Valid original policy citation matching retrieved evidence is accepted."""
@@ -522,7 +517,7 @@ class TestGroundedAnswer(unittest.TestCase):
         amendments = load_amendment("data/Amendment No. 2026-01.md")
         amend_5_2 = [c for c in amendments if c.clause_id == "Amendment 2026-01 §5.2"][0]
 
-        evidence = [self.clause_4_3_2, amend_5_2]  # Only §5.2 provided, NOT §5.1
+        evidence = [self.clause_4_3_2, amend_5_2]  
         mock_response = "Because of Amendment 2026-01 §5.1, the new rule applies [Amendment 2026-01 §5.1]."
 
         result = generate_answer(
@@ -537,7 +532,7 @@ class TestGroundedAnswer(unittest.TestCase):
     def test_part4_e_no_citation_for_substantive_claim(self):
         """Test Part 4E: Making a substantive factual policy claim with no citations flags missing citations."""
         evidence = [self.clause_4_3_2]
-        mock_response = "The reporting deadline is 10 calendar days."  # No citations included
+        mock_response = "The reporting deadline is 10 calendar days."  
 
         result = generate_answer(
             question="What is the reporting deadline?",
@@ -573,7 +568,7 @@ class TestGroundedAnswer(unittest.TestCase):
 
     def test_part4_g_mixed_valid_and_invalid_citations(self):
         """Test Part 4G: Response with one valid citation and one invalid citation reports both accurately."""
-        evidence = [self.clause_4_3_2]  # Only §4.3.2 provided
+        evidence = [self.clause_4_3_2]  
         mock_response = "The reporting deadline is 10 days [§4.3.2], and disregard is $175 [§6.4.1]."
 
         result = generate_answer(
@@ -619,9 +614,6 @@ class TestGroundedAnswer(unittest.TestCase):
         self.assertEqual(vc.source_document, "Amendment No. 2026-01.md")
 
 
-    # =========================================================================
-    # PART 5 ROBUST REFUSAL & INSUFFICIENT EVIDENCE TESTS
-    # =========================================================================
 
     def test_part5_a_empty_retrieval_fast_refusal(self):
         """Test Part 5A: Empty retrieval results return immediate refusal without invoking LLM."""
@@ -690,7 +682,7 @@ class TestGroundedAnswer(unittest.TestCase):
 
     def test_part5_d_unsupported_policy_topic(self):
         """Test Part 5D: If retrieved evidence is unrelated to user question, refusal is returned."""
-        evidence = [self.clause_1_4_6]  # Evidence only about full-time students
+        evidence = [self.clause_1_4_6]  
         mock_response = "The provided policy evidence is insufficient to answer how to appeal a property tax assessment."
 
         result = generate_answer(
@@ -764,7 +756,7 @@ class TestGroundedAnswer(unittest.TestCase):
 
     def test_part5_i_temporal_insufficient_evidence(self):
         """Test Part 5I: Date-specific query lacking required amendment evidence yields refusal."""
-        evidence = [self.clause_4_3_2]  # Only original 10-day clause, no Amendment 2026-01
+        evidence = [self.clause_4_3_2]  
         mock_response = "The provided policy evidence is insufficient to determine post-amendment reporting rules."
 
         result = generate_answer(

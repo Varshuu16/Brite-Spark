@@ -20,20 +20,16 @@ from src.conflict import detect_conflicts
 from src.answer import generate_answer, AnswerResult
 
 
-# Initialize Flask application with explicit template folder
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "britespark-policy-secret-key-2026")
 
-# Configure session as non-permanent browser session cookie
 app.config["SESSION_PERMANENT"] = False
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
-# Unique application generation ID generated fresh on every server startup
 SERVER_GENERATION_ID = str(uuid.uuid4())
 
-# Load policy corpus and initialize deterministic retriever
 _CORPUS = None
 _RETRIEVER = None
 
@@ -60,7 +56,6 @@ def get_offline_mock_client(retrieved: list, t_ctx: Any, has_conflict: bool):
         if not retrieved or "france" in q_low or "weather" in q_low or "property tax" in q_low:
             return "The provided policy evidence is insufficient to answer this question."
 
-        # Adversarial mixed date: Change Feb 2026, Determination Mar 2026
         if "change occurred on 20 february 2026" in q_low:
             return (
                 "Under Amendment No. 2026-01 §5.2, the reporting deadline is governed by the date the change occurred. "
@@ -68,7 +63,6 @@ def get_offline_mock_client(retrieved: list, t_ctx: Any, has_conflict: bool):
                 "Under §4.3.2, the recipient must report the change within 10 calendar days."
             )
 
-        # Adversarial reverse mixed date: Change Mar 2026, Determination Feb 2026
         if "change occurred on 20 march 2026" in q_low:
             return (
                 "Under Amendment No. 2026-01 §5.2, the reporting deadline is governed by the date the change occurred. "
@@ -76,48 +70,41 @@ def get_offline_mock_client(retrieved: list, t_ctx: Any, has_conflict: bool):
                 "Under §4.3.2 as amended, the recipient must report within 14 calendar days."
             )
 
-        # Pre-amendment reporting
         if "10 february 2026" in q_low and "reporting" in q_low:
             return (
                 "For a change of circumstances occurring on 10 February 2026, the pre-amendment deadline applies under "
                 "Amendment No. 2026-01 §5.2. Under §4.3.2, the recipient must report within 10 calendar days."
             )
 
-        # Post-amendment reporting
         if "15 april 2026" in q_low and "reporting" in q_low:
             return (
                 "For a change of circumstances occurring on 15 April 2026, the amended deadline applies under "
                 "Amendment No. 2026-01 §2.1 and §5.2. Under §4.3.2 as amended, the recipient must report within 14 calendar days."
             )
 
-        # Determination date March 2026
         if "20 march 2026" in q_low and ("disregard" in q_low or "january 2026" in q_low):
             return (
                 "Under Amendment No. 2026-01 §5.1, amendments apply to any determination made on or after 1 March 2026, "
                 "even for a prior period such as January 2026. Therefore, under §6.4.1 as amended, the earnings disregard is $175 per month."
             )
 
-        # Pre-amendment determination Feb 2026
         if "20 february 2026" in q_low and "disregard" in q_low:
             return (
                 "Under §6.4.1 of the original policy manual, for determinations made on 20 February 2026, the earnings disregard is $120 per month."
             )
 
-        # Spanning period
         if "15 february 2026" in q_low and "15 march 2026" in q_low:
             return (
                 "Under Amendment No. 2026-01 §5.3, for claim periods spanning across 1 March 2026, the award is calculated using daily rates "
                 "and apportioned under §7.4.3."
             )
 
-        # Sanction exception §10.5.3A
         if "increased the award" in q_low or "positive" in q_low:
             return (
                 "Under §10.5.3A, no sanction shall be imposed where the unreported change "
                 "of circumstances is one that would have increased the household's award."
             )
 
-        # Substantive conflict: §4.3.2 vs §9.1.4
         if has_conflict and "4.3.2" in evidence_ids and "9.1.4" in evidence_ids:
             return (
                 "The retrieved policy evidence contains two related references with different timeframes: "
@@ -126,7 +113,6 @@ def get_offline_mock_client(retrieved: list, t_ctx: Any, has_conflict: bool):
                 "whereas §9.1.4 references a 30 calendar day period regarding overpayment establishment notifications."
             )
 
-        # Unspecified disregard
         if "disregard" in q_low:
             return (
                 "Under the original policy manual (§6.4.1), the first $120 per month of earnings is disregarded. "
@@ -134,7 +120,6 @@ def get_offline_mock_client(retrieved: list, t_ctx: Any, has_conflict: bool):
                 "Under Amendment No. 2026-01 §5.1, the $175 disregard applies to determinations on or after 1 March 2026."
             )
 
-        # Default reporting
         return (
             "Prior to 1 March 2026, a recipient must report changes within 10 calendar days under §4.3.2. "
             "Effective 1 March 2026 under Amendment No. 2026-01 §2.1, the reporting period is 14 calendar days. "
@@ -182,7 +167,6 @@ def index():
             t_ctx = extract_temporal_context(question)
             retrieved = retriever.retrieve(question, top_k=5)
 
-            # Determine whether live Gemini or deterministic offline mode is active
             api_key = os.environ.get("GEMINI_API_KEY")
             client = None
             if not api_key:
@@ -197,7 +181,6 @@ def index():
                 temporal_context=t_ctx,
             )
 
-            # Record turn in session history
             turn_entry = {
                 "question": question,
                 "answer": result.answer,
@@ -236,7 +219,6 @@ def index():
             chat_id=chat_id,
         )
 
-    # GET request: render existing active history or empty initial state
     chat_id = request.args.get("chat_id", "").strip()
     history_key = f"history_{chat_id}" if chat_id else "history"
     history = session.get(history_key, session.get("history", []))

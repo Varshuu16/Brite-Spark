@@ -176,7 +176,6 @@ def load_amendment(file_path: Union[str, Path] = "data/Amendment No. 2026-01.md"
     content = path.read_text(encoding="utf-8")
     amendment_clauses: List[PolicyClause] = []
 
-    # Para 1.1: Earnings disregard
     amendment_clauses.append(PolicyClause(
         clause_id="6.4.1",
         clause_text="In §6.4.1(a), for \"$120 per month\" substitute \"$175 per month\". Under §6.4.1(a) as amended by Amendment No. 2026-01, the first $175 per month of household earnings from employment is disregarded.",
@@ -192,7 +191,6 @@ def load_amendment(file_path: Union[str, Path] = "data/Amendment No. 2026-01.md"
         is_amendment=True,
     ))
 
-    # Para 2.1: §4.3.2 Reporting changes
     amendment_clauses.append(PolicyClause(
         clause_id="4.3.2",
         clause_text="A recipient must report any change in household composition, income, address, or the circumstances of any household member within **14 calendar days** of the change occurring, or within 14 calendar days of the recipient becoming aware of the change, whichever is later (as amended by Amendment No. 2026-01).",
@@ -208,7 +206,6 @@ def load_amendment(file_path: Union[str, Path] = "data/Amendment No. 2026-01.md"
         is_amendment=True,
     ))
 
-    # Para 2.2: §9.1.4 Overpayment safe harbor
     amendment_clauses.append(PolicyClause(
         clause_id="9.1.4",
         clause_text="Where an overpayment has arisen from a change of circumstances, and the recipient reported the change within the **14 calendar days** required under §4.3, no overpayment shall be established in respect of any period before the date on which the Department was in a position to act on the report (as amended by Amendment No. 2026-01).",
@@ -224,7 +221,6 @@ def load_amendment(file_path: Union[str, Path] = "data/Amendment No. 2026-01.md"
         is_amendment=True,
     ))
 
-    # Para 3.1: §6.6.1 Income thresholds table
     table_text = (
         "Under §6.6.1 as amended by Amendment No. 2026-01, the monthly income thresholds are:\n\n"
         "| Household size | Monthly threshold |\n"
@@ -251,7 +247,6 @@ def load_amendment(file_path: Union[str, Path] = "data/Amendment No. 2026-01.md"
         is_amendment=True,
     ))
 
-    # Para 4.1: §10.5.2 Sanction percentage
     amendment_clauses.append(PolicyClause(
         clause_id="10.5.2",
         clause_text="Under §10.5.2 as amended by Amendment No. 2026-01, a sanction is a reduction of the standard allowance by **15 per cent** for a period of — (a) four weeks for a first failure; (b) thirteen weeks for a second failure within twelve months of the first.",
@@ -267,7 +262,6 @@ def load_amendment(file_path: Union[str, Path] = "data/Amendment No. 2026-01.md"
         is_amendment=True,
     ))
 
-    # Para 4.2: Inserted §10.5.3A
     amendment_clauses.append(PolicyClause(
         clause_id="10.5.3A",
         clause_text="A sanction must not be imposed in respect of a failure to report where the change of circumstances in question would have increased the award (inserted by Amendment No. 2026-01).",
@@ -282,7 +276,6 @@ def load_amendment(file_path: Union[str, Path] = "data/Amendment No. 2026-01.md"
         is_amendment=True,
     ))
 
-    # Para 5.1: Transitional determinations
     amendment_clauses.append(PolicyClause(
         clause_id="Amendment 2026-01 §5.1",
         clause_text="The amendments made by paragraphs 1 (§6.4.1(a)), 3 (§6.6.1) and 4 (§10.5.2, §10.5.3A) apply to any determination made on or after 1 March 2026, including a determination in respect of a period before that date.",
@@ -296,7 +289,6 @@ def load_amendment(file_path: Union[str, Path] = "data/Amendment No. 2026-01.md"
         is_transitional=True,
     ))
 
-    # Para 5.2: Transitional reporting changes
     amendment_clauses.append(PolicyClause(
         clause_id="Amendment 2026-01 §5.2",
         clause_text="The amendments made by paragraph 2 (§4.3.2 and §9.1.4) apply only in respect of a change of circumstances occurring on or after 1 March 2026. Where the change of circumstances occurred before 1 March 2026, the reporting period is the period that applied at the date of the change (10 calendar days under §4.3.2 / 30 calendar days under §9.1.4), irrespective of the date of the determination.",
@@ -310,7 +302,6 @@ def load_amendment(file_path: Union[str, Path] = "data/Amendment No. 2026-01.md"
         is_transitional=True,
     ))
 
-    # Para 5.3: Transitional spanning periods
     amendment_clauses.append(PolicyClause(
         clause_id="Amendment 2026-01 §5.3",
         clause_text="Where a claim relates to a period spanning 1 March 2026, the applicable figures are those in force on each day of the period, and the award is apportioned accordingly under §7.4.3.",

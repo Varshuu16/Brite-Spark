@@ -19,7 +19,6 @@ class PolicyClause:
     parent_part: Optional[str] = None
     hierarchy: Dict[str, Any] = field(default_factory=dict)
     raw_text: Optional[str] = None
-    # Temporal & Amendment Metadata
     source_document: str = "policy-manual.md"
     effective_date: Optional[str] = "2025-12-31"
     amended_by: Optional[str] = None
@@ -87,7 +86,7 @@ class AmendmentProvision:
     paragraph_id: str
     title: str
     target_clause_id: Optional[str]
-    action: str  # 'SUBSTITUTE', 'INSERT', 'TRANSITIONAL'
+    action: str  
     text: str
     effective_date: str = "2026-03-01"
     transitional_rule: Optional[str] = None
@@ -136,7 +135,7 @@ class PolicyConflict:
     source_documents: List[str]
     conflicting_values: Dict[str, str] = field(default_factory=dict)
     description: str = ""
-    conflict_type: str = "SUBSTANTIVE"  # 'SUBSTANTIVE', 'TEMPORAL_UNRESOLVED', 'SANCTION_DISCREPANCY'
+    conflict_type: str = "SUBSTANTIVE" 
     resolution_available: bool = False
     resolution_notes: Optional[str] = None
 

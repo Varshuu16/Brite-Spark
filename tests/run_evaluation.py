@@ -32,7 +32,6 @@ try:
         AnswerResult,
     )
 except ImportError:
-    # Fallback to workspace root
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from src.loader import load_full_policy_corpus
     from src.retriever import PolicyRetriever, ScoredClause
@@ -57,11 +56,9 @@ def generate_deterministic_mock_response(
     q_low = question.lower()
     evidence_ids = {r.clause.clause_id.lstrip("§").strip() for r in retrieved}
 
-    # Refusal for out-of-domain or zero evidence
     if not retrieved or "france" in q_low or "weather" in q_low or "property tax" in q_low:
         return "The provided policy evidence is insufficient to answer this question."
 
-    # Adversarial mixed date: Change Feb 2026, Determination Mar 2026
     if "change occurred on 20 february 2026" in q_low:
         return (
             "Under Amendment No. 2026-01 §5.2, the reporting deadline is governed by the date the change occurred. "
@@ -69,7 +66,6 @@ def generate_deterministic_mock_response(
             "Under §4.3.2, the recipient must report the change within 10 calendar days."
         )
 
-    # Adversarial reverse mixed date: Change Mar 2026, Determination Feb 2026
     if "change occurred on 20 march 2026" in q_low:
         return (
             "Under Amendment No. 2026-01 §5.2, the reporting deadline is governed by the date the change occurred. "
@@ -77,48 +73,41 @@ def generate_deterministic_mock_response(
             "Under §4.3.2 as amended, the recipient must report within 14 calendar days."
         )
 
-    # Pre-amendment reporting
     if "10 february 2026" in q_low and "reporting" in q_low:
         return (
             "For a change of circumstances occurring on 10 February 2026, the pre-amendment deadline applies under "
             "Amendment No. 2026-01 §5.2. Under §4.3.2, the recipient must report within 10 calendar days."
         )
 
-    # Post-amendment reporting
     if "15 april 2026" in q_low and "reporting" in q_low:
         return (
             "For a change of circumstances occurring on 15 April 2026, the amended deadline applies under "
             "Amendment No. 2026-01 §2.1 and §5.2. Under §4.3.2 as amended, the recipient must report within 14 calendar days."
         )
 
-    # Determination date March 2026
     if "20 march 2026" in q_low and ("disregard" in q_low or "january 2026" in q_low):
         return (
             "Under Amendment No. 2026-01 §5.1, amendments apply to any determination made on or after 1 March 2026, "
             "even for a prior period such as January 2026. Therefore, under §6.4.1 as amended, the earnings disregard is $175 per month."
         )
 
-    # Pre-amendment determination Feb 2026
     if "20 february 2026" in q_low and "disregard" in q_low:
         return (
             "Under §6.4.1 of the original policy manual, for determinations made on 20 February 2026, the earnings disregard is $120 per month."
         )
 
-    # Spanning period
     if "15 february 2026" in q_low and "15 march 2026" in q_low:
         return (
             "Under Amendment No. 2026-01 §5.3, for claim periods spanning across 1 March 2026, the award is calculated using daily rates "
             "and apportioned under §7.4.3."
         )
 
-    # Sanction exception §10.5.3A
     if "increased the award" in q_low or "positive" in q_low:
         return (
             "Under §10.5.3A, no sanction shall be imposed where the unreported change "
             "of circumstances is one that would have increased the household's award."
         )
 
-    # Substantive conflict: §4.3.2 vs §9.1.4
     if has_conflict and "4.3.2" in evidence_ids and "9.1.4" in evidence_ids:
         return (
             "The retrieved policy evidence contains two related references with different timeframes: "
@@ -127,7 +116,6 @@ def generate_deterministic_mock_response(
             "whereas §9.1.4 references a 30 calendar day period regarding overpayment establishment notifications."
         )
 
-    # Unspecified disregard
     if "disregard" in q_low:
         return (
             "Under the original policy manual (§6.4.1), the first $120 per month of earnings is disregarded. "
@@ -135,14 +123,12 @@ def generate_deterministic_mock_response(
             "Under Amendment No. 2026-01 §5.1, the $175 disregard applies to determinations on or after 1 March 2026."
         )
 
-    # Multi-clause calculation
     if "calculated" in q_low and "needs" in q_low:
         return (
             "Under §7.1.1, the household award is calculated using the formula: Award = Applicable Amount - Net Household Income. "
             "The applicable amount is determined by reference to standard allowances under §7.2.1."
         )
 
-    # Default reporting
     return (
         "Prior to 1 March 2026, a recipient must report changes within 10 calendar days under §4.3.2. "
         "Effective 1 March 2026 under Amendment No. 2026-01 §2.1, the reporting period is 14 calendar days. "
@@ -169,10 +155,8 @@ def run_evaluation(
     failed_cases = 0
     case_results: List[Dict[str, Any]] = []
 
-    # Category counters: {category: (passed, total)}
     category_counts: Dict[str, List[int]] = defaultdict(lambda: [0, 0])
 
-    # Metric tracking
     retrieval_hits = 0
     temporal_hits = 0
     citation_valid_hits = 0
@@ -185,7 +169,6 @@ def run_evaluation(
         case_passed = True
         failure_reasons: List[str] = []
 
-        # 1. Deterministic Temporal Context Extraction
         t_ctx = extract_temporal_context(case.question)
         if case.expected_status is not None:
             if t_ctx.status.value != case.expected_status:
@@ -198,9 +181,7 @@ def run_evaluation(
         else:
             temporal_hits += 1
 
-        # 2. Deterministic Retrieval
         if case.case_id == "E19":
-            # Determinism stability test: run 5 consecutive retrievals
             first_res = retriever.retrieve(case.question, top_k=5)
             for _ in range(4):
                 next_res = retriever.retrieve(case.question, top_k=5)
@@ -218,7 +199,6 @@ def run_evaluation(
         retrieved_ids = {r.clause.clause_id.lstrip("§").strip() for r in retrieved}
         retrieved_citations = {r.citation for r in retrieved}
 
-        # Check retrieval of expected clause IDs
         if case.expected_clause_ids:
             found_all_expected = True
             for expected_id in case.expected_clause_ids:
@@ -238,10 +218,8 @@ def run_evaluation(
                     f"Retrieval mismatch: expected clauses {case.expected_clause_ids}, retrieved {[r.citation for r in retrieved]}"
                 )
         else:
-            # Expected empty/irrelevant retrieval
             retrieval_hits += 1
 
-        # 3. Conflict Detection
         detected_conflicts = detect_conflicts(retrieved, temporal_context=t_ctx, question=case.question)
         has_detected_conflict = len(detected_conflicts) > 0
         if has_detected_conflict == case.expected_conflict:
@@ -252,7 +230,6 @@ def run_evaluation(
                 f"Conflict detection mismatch: expected conflict={case.expected_conflict}, detected={has_detected_conflict}"
             )
 
-        # 4. Answer Generation & Citation Validation
         mock_text = case.mock_response or generate_deterministic_mock_response(
             case.question, retrieved, t_ctx, has_detected_conflict
         )
@@ -264,7 +241,6 @@ def run_evaluation(
             temporal_context=t_ctx,
         )
 
-        # 5. Refusal Verification
         if case.expected_refusal:
             if result.insufficient_evidence and not result.grounded and len(result.citations) == 0:
                 refusal_hits += 1
@@ -280,23 +256,19 @@ def run_evaluation(
                 case_passed = False
                 failure_reasons.append("Unexpected refusal: valid question was refused")
 
-        # 6. Citation Correctness & Grounding Checks
         if case.case_id == "E16":
-            # Citation hallucination test: must be ungrounded with unsupported citation
             if not result.grounded and "9.9.9" in result.unsupported_citations:
                 citation_valid_hits += 1
             else:
                 case_passed = False
                 failure_reasons.append("Hallucinated citation §9.9.9 was not flagged as unsupported")
         elif case.case_id == "E17":
-            # Missing citation completeness test: must fail completeness
             if not result.citation_complete:
                 citation_complete_hits += 1
             else:
                 case_passed = False
                 failure_reasons.append("Un-cited substantive claim was not flagged by citation completeness")
         elif case.case_id == "E18":
-            # Numeric false-positive test: must not treat 10, 14, $175, 2026 as citations
             extracted = extract_citations(mock_text)
             numeric_false_positives = [c for c in extracted if c in ["10", "14", "175", "2026", "$175", "10 calendar days"]]
             if not numeric_false_positives and "4.3.2" in extracted:
@@ -322,7 +294,6 @@ def run_evaluation(
                 citation_valid_hits += 1
                 citation_complete_hits += 1
 
-        # 7. Answer Keyword Checks
         if case.expected_answer_keywords and not case.expected_refusal and case.case_id not in ["E16", "E17"]:
             ans_lower = result.answer.lower()
             missing_keywords = [kw for kw in case.expected_answer_keywords if kw.lower() not in ans_lower]
@@ -330,7 +301,6 @@ def run_evaluation(
                 case_passed = False
                 failure_reasons.append(f"Answer missing expected keywords: {missing_keywords}")
 
-        # Update case outcome
         if case_passed:
             passed_cases += 1
             category_counts[case.category][0] += 1

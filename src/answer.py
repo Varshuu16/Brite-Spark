@@ -31,7 +31,6 @@ except ImportError:
     from conflict import detect_conflicts
 
 
-# Default Gemini model and timeout configured for grounded answer generation
 DEFAULT_GEMINI_MODEL: str = "gemini-3.6-flash"
 DEFAULT_TIMEOUT_SECONDS: float = 60.0
 
@@ -120,7 +119,6 @@ def extract_citations(text: str) -> List[str]:
             seen.add(full_id)
             ordered.append(full_id)
 
-    # 2. Remove amendment substrings to prevent false matches on amendment year or paragraph numbers
     text_clean = re.sub(
         r"\[?Amendment\s+(?:No\.\s+)?2026-01\s+§?\d+\.\d+\]?",
         "",
@@ -128,9 +126,6 @@ def extract_citations(text: str) -> List[str]:
         flags=re.IGNORECASE
     )
 
-    # 3. Match standard clauses with mandatory section/clause prefix:
-    # Requires '§', '[§', 'clause ', or 'section ' before clause identifier
-    # Matches: §4.3.2, [§4.3.2], §10.5.3A, section 6.4.1, clause 1.4.6, §6.4.1(a)
     std_matches = re.findall(
         r"(?:§|\[§|clause\s+|section\s+)(\d{1,2}\.\d{1,2}(?:\.\d{1,2}[A-Za-z]?(?:\([a-z]\))?)?)",
         text_clean,
@@ -138,7 +133,6 @@ def extract_citations(text: str) -> List[str]:
     )
     for m in std_matches:
         clean = m.strip()
-        # Avoid year numbers or malformed tokens
         if clean.startswith("2026") or clean.startswith("2025"):
             continue
         if clean and clean not in seen:
@@ -241,7 +235,6 @@ def validate_citations(
     valid_citations: List[str] = []
     unsupported_citations: List[str] = []
 
-    # Build allowed token lookup set and clause object map
     normalized_allowed: Set[str] = set()
     clause_objects_by_token: Dict[str, PolicyClause] = {}
 
@@ -309,7 +302,6 @@ def validate_citations_detailed(
     validated_objects: List[PolicyCitation] = []
     unsupported_citations: List[str] = []
 
-    # Map retrieved clauses by all their normalized identifiers
     clause_map: Dict[str, PolicyClause] = {}
     for item in retrieved_clauses:
         clause = item.clause if isinstance(item, ScoredClause) else item
@@ -392,22 +384,18 @@ def check_citation_completeness(
         True if the answer has valid citations OR is a refusal / uncertainty statement.
         False if the answer makes factual policy claims but fails to provide citations.
     """
-    # If the response indicates insufficient evidence / refusal, no policy citation is required
     if insufficient_evidence or check_insufficient_evidence(answer):
         return True
 
-    # If valid citations are present, citation completeness is satisfied
     if len(valid_citations) > 0:
         return True
 
-    # When no citations are present, check if the response makes substantive policy assertions
     lower = answer.lower()
 
-    # Patterns indicating substantive administrative policy claims
     policy_patterns = [
-        r"\b\d+\s+(?:calendar\s+)?(?:days|weeks|months|years)\b",  # e.g., 10 calendar days, 4 weeks
-        r"\$\d+",                                                    # e.g., $120, $175
-        r"\b\d+\s*(?:%|percent|per cent)\b",                        # e.g., 15 per cent, 20%
+        r"\b\d+\s+(?:calendar\s+)?(?:days|weeks|months|years)\b",  
+        r"\$\d+",                                                    
+        r"\b\d+\s*(?:%|percent|per cent)\b",                      
         r"\b(?:must\s+report|required\s+to|obligation|entitled\s+to|eligible|ineligible)\b",
         r"\b(?:disregard\s+is|disregarded|threshold\s+is|sanction\s+is|reduction\s+of)\b",
         r"\b(?:deadline\s+is|period\s+is|within\s+\d+|apportioned)\b",
@@ -415,7 +403,6 @@ def check_citation_completeness(
 
     has_substantive_claims = any(re.search(pat, lower) for pat in policy_patterns)
 
-    # If substantive claims were asserted without any citation, completeness failed
     if has_substantive_claims:
         return False
 
@@ -451,7 +438,6 @@ def generate_answer(
     """
     t_ctx = temporal_context or extract_temporal_context(question)
 
-    # Extract allowed clause IDs
     allowed_ids: Set[str] = set()
     for item in retrieved_clauses:
         clause = item.clause if isinstance(item, ScoredClause) else item
@@ -465,7 +451,6 @@ def generate_answer(
             allowed_ids.add(f"§{clause.transitional_rule}")
             allowed_ids.add(clause.transitional_rule)
 
-    # Fast-path: If no evidence was retrieved, refuse without calling LLM
     if not retrieved_clauses or not allowed_ids:
         return AnswerResult(
             answer="The provided policy evidence is insufficient to answer this question.",
@@ -483,7 +468,6 @@ def generate_answer(
             temporal_context=t_ctx,
         )
 
-    # Detect substantive conflicts across retrieved evidence
     detected_conflicts = detect_conflicts(retrieved_clauses, temporal_context=t_ctx, question=question)
     has_conflicts = len(detected_conflicts) > 0
 
@@ -496,10 +480,8 @@ def generate_answer(
     effective_model = model or os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
     http_opts = types.HttpOptions(timeout=int(timeout_seconds * 1000)) if HAVE_GEMINI_SDK else None
 
-    # Handle Gemini invocation or mock client with graceful exception handling
     try:
         if client is not None:
-            # Mock or custom client
             if hasattr(client, "generate"):
                 raw_response = client.generate(prompt)
             elif hasattr(client, "models") and hasattr(client.models, "generate_content"):
@@ -517,7 +499,6 @@ def generate_answer(
             else:
                 raise ValueError(f"Unsupported client object type: {type(client)}")
         else:
-            # Live Gemini API call
             resolved_key = api_key or os.environ.get("GEMINI_API_KEY")
             if not resolved_key:
                 raise ValueError(
@@ -558,7 +539,6 @@ def generate_answer(
             temporal_context=t_ctx,
         )
 
-    # Validate citations and analyze grounding and completeness
     valid_citations, validated_objects, unsupported_citations, is_grounded = validate_citations_detailed(
         raw_response, retrieved_clauses
     )
@@ -624,7 +604,6 @@ if __name__ == "__main__":
             print("Using live Gemini API...")
             result = generate_answer(demo_question, retrieved, api_key=api_key)
         else:
-            # Deterministic mock simulation for offline verification
             def mock_llm(p: str) -> str:
                 q_part = p
                 if "USER QUESTION:" in p:
